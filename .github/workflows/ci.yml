@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go-version: ["1.26"]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ matrix.go-version }}
+
+      - name: Run tests
+        run: go test ./... -count=1 -race
+
+      - name: Test integrations (gormguard)
+        run: cd integrations/gormguard && go test ./... -count=1 -race
+
+      - name: Test integrations (sqlxguard)
+        run: cd integrations/sqlxguard && go test ./... -count=1 -race
+
+      - name: Test integrations (pgxguard)
+        run: cd integrations/pgxguard && go test ./... -count=1 -race
+
+      - name: Test integrations (bunguard)
+        run: cd integrations/bunguard && go test ./... -count=1 -race
+
+      - name: Test integrations (xormguard)
+        run: cd integrations/xormguard && go test ./... -count=1 -race
+
+      - name: Test integrations (entguard)
+        run: cd integrations/entguard && go test ./... -count=1 -race
+
+      - name: Test parsers (pgparser)
+        run: cd parsers/pgparser && go test ./... -count=1 -race
+
+      - name: Test parsers (mysqlparser)
+        run: cd parsers/mysqlparser && go test ./... -count=1 -race
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.11
+          args: --timeout=5m
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+
+      - name: Build CLI
+        run: go build -o bin/sqlguard ./cmd/sqlguard
+
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+
+      # `make coverage` runs every module and merges into a single coverage.out
+      # (root go test does not reach the satellite modules).
+      - name: Generate merged coverage
+        run: make coverage
+
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage.out
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false

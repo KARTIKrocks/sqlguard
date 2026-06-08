@@ -1,0 +1,60 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly re-scan so newly published CodeQL queries flag old code too.
+    - cron: "0 6 * * 1"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'schedule' }}
+
+permissions:
+  security-events: write
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze (Go)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: go
+          # Build the modules ourselves (below) so the tracer sees all nine.
+          build-mode: manual
+          queries: security-extended
+
+      # Each integration/parser carries its own go.mod (heavy deps kept opt-in),
+      # so `go build ./...` from root does NOT reach them. Build every module
+      # under the CodeQL tracer so all nine are analyzed — same MODULES loop the
+      # Makefile uses; a satellite must not silently skip scanning.
+      - name: Build all modules
+        run: |
+          set -e
+          for mod in . \
+            ./integrations/gormguard ./integrations/sqlxguard \
+            ./integrations/pgxguard ./integrations/bunguard \
+            ./integrations/xormguard ./integrations/entguard \
+            ./parsers/pgparser ./parsers/mysqlparser; do
+            echo "==> Building $mod"
+            (cd "$mod" && go build ./...)
+          done
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:go"
