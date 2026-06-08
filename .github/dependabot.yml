@@ -1,0 +1,56 @@
+version: 2
+
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      go-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: gomod
+    directory: /integrations/gormguard
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: gomod
+    directory: /integrations/sqlxguard
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: gomod
+    directory: /integrations/pgxguard
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: gomod
+    directory: /integrations/bunguard
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: gomod
+    directory: /integrations/xormguard
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: gomod
+    directory: /integrations/entguard
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: gomod
+    directory: /parsers/pgparser
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: gomod
+    directory: /parsers/mysqlparser
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

@@ -1,0 +1,73 @@
+# sqlguard configuration. Copy to `.sqlguard.yml` at your project root
+# (sqlguard discovers it by walking up from the scanned/working directory
+# until it hits the file or the git root).
+#
+# Every key is optional; omitting the file runs all rules at their defaults.
+
+version: 1
+
+# strict: true turns "soft" problems (unknown keys, unknown rule names,
+# invalid severities) into hard errors instead of warnings. Leave false so a
+# config written for a newer sqlguard still loads on an older binary.
+strict: false
+
+rules:
+  # Turn rules off entirely.
+  disable:
+    - orderby-without-limit
+
+  # Whitelist mode: when non-empty, ONLY these rules run (disable is ignored).
+  # only:
+  #   - delete-without-where
+  #   - update-without-where
+
+  # Override the reported severity per rule: info | warning | critical | off
+  # ("off" is equivalent to disabling the rule).
+  severity:
+    select-star: info
+    select-without-limit: "off"
+
+  # Per-rule tunables. Keys are rule-specific.
+  settings:
+    leading-wildcard:
+      # Don't flag LIKE/ILIKE '%x%' style patterns whose searchable term is
+      # shorter than this many characters.
+      min-length: 3
+    in-list-too-large:
+      # Flag IN (...) value lists with more than this many elements
+      # (default 100). Subquery INs are never counted.
+      max-length: 100
+    large-offset:
+      # Flag a literal OFFSET above this (default 1000) — deep pagination.
+      # Parameterized offsets (OFFSET $1 / ?) can't be evaluated statically.
+      threshold: 1000
+
+# Redact literal values (strings/numbers) out of Result.Query before it
+# reaches any reporter/log. ON by default — leave it on so customer data in
+# query literals never lands in your logs. Result.Fingerprint (a PII-free,
+# value-free query identity) is emitted regardless. Set to false ONLY for
+# local debugging where the query text is trusted.
+redact: true
+
+# Runtime slow-query threshold (middleware). Go duration string.
+slow-query:
+  threshold: 200ms
+
+# Runtime de-duplication of repeated static findings (middleware). The same
+# finding (rule + query fingerprint) is reported at most once per window, so a
+# recurring query doesn't flood your logs. Default 1m. Set "0" to disable
+# (report every occurrence). Slow-query and N+1 have their own emission policy.
+dedup:
+  window: 1m
+
+# Static scanner only: skip files whose path matches any of these regexes.
+scan:
+  exclude-paths:
+    - "(^|/)legacy/"
+    - "_gen\\.go$"
+
+# Inline suppressions (no config needed):
+#   In SQL:  SELECT * FROM t            -- sqlguard:ignore
+#            DELETE FROM t              /* sqlguard:ignore:delete-without-where */
+#   In Go:   // sqlguard:ignore                 (on or above the db call)
+#            db.Query(q) // sqlguard:ignore:select-star

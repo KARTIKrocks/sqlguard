@@ -121,7 +121,11 @@ reviews:
         comment/string-aware multi-statement rejection and SELECT/WITH-only (DML
         behind WithAllowDML) policy. EXPLAIN takes no bind params, so
         concatenation is by design — the defense is validate() + the rolled-back
-        read-only tx; do not "fix" it with parameterization.
+        read-only tx; do not "fix" it with parameterization. Deliberate
+        carve-out: explain keeps Result.Query (and the inner analyzer.Result
+        .Query of its findings) RAW — the user typed the query on their own CLI,
+        it never reaches a log/telemetry sink, and Fingerprint is still set. Do
+        NOT flag explain findings for not redacting Query; that is intended.
 
     - path: "**/*_test.go"
       instructions: >-
