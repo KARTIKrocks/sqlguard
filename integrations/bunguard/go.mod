@@ -3,7 +3,7 @@ module github.com/KARTIKrocks/sqlguard/integrations/bunguard
 go 1.26
 
 require (
-	github.com/KARTIKrocks/sqlguard v0.0.0
+	github.com/KARTIKrocks/sqlguard v0.1.0
 	github.com/mattn/go-sqlite3 v1.14.45
 	github.com/uptrace/bun v1.2.18
 	github.com/uptrace/bun/dialect/sqlitedialect v1.2.18
@@ -17,5 +17,3 @@ require (
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	golang.org/x/sys v0.41.0 // indirect
 )
-
-replace github.com/KARTIKrocks/sqlguard => ../..

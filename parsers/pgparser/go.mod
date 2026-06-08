@@ -2,7 +2,7 @@ module github.com/KARTIKrocks/sqlguard/parsers/pgparser
 
 go 1.26
 
-require github.com/KARTIKrocks/sqlguard v0.0.0
+require github.com/KARTIKrocks/sqlguard v0.1.0
 
 require (
 	github.com/auxten/postgresql-parser v1.0.1
@@ -31,5 +31,3 @@ require (
 	google.golang.org/grpc v1.33.1 // indirect
 	google.golang.org/protobuf v1.25.0 // indirect
 )
-
-replace github.com/KARTIKrocks/sqlguard => ../..
