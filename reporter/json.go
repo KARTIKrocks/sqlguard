@@ -52,5 +52,8 @@ func (j *JSONReporter) Report(results []analyzer.Result) {
 
 	enc := json.NewEncoder(j.Out)
 	enc.SetIndent("", "  ")
-	_ = enc.Encode(out)
+	if err := enc.Encode(out); err != nil {
+		// Fallback: log encoding failure since Reporter interface can't return error
+		fmt.Fprintf(os.Stderr, "sqlguard: failed to encode JSON report: %v\n", err)
+	}
 }
