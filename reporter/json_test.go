@@ -10,7 +10,7 @@ import (
 
 func TestJSONReporter_Report(t *testing.T) {
 	var buf bytes.Buffer
-	rep := &JSONReporter{Out: &buf}
+	rep := NewJSONReporterTo(&buf)
 
 	results := []analyzer.Result{
 		{
@@ -62,7 +62,7 @@ func TestJSONReporter_Report(t *testing.T) {
 
 func TestJSONReporter_EmptyResults(t *testing.T) {
 	var buf bytes.Buffer
-	rep := &JSONReporter{Out: &buf}
+	rep := NewJSONReporterTo(&buf)
 
 	rep.Report([]analyzer.Result{})
 

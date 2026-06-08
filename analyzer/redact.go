@@ -123,7 +123,8 @@ func scanNumber(s string, i int) int {
 }
 
 // skipSingleQuoted returns the index just past the single-quoted string
-// literal starting at s[i] == '\”, honoring '' doubled-quote escapes.
+// literal that opens at s[i], treating a doubled single-quote (two in a row)
+// as an escaped quote rather than the terminator.
 func skipSingleQuoted(s string, i int) int {
 	i++ // opening quote
 	for i < len(s) {

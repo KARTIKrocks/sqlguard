@@ -48,6 +48,8 @@ go install github.com/KARTIKrocks/sqlguard/cmd/sqlguard@latest
 | `seq-scan`                     | WARNING  | Sequential scan detected via EXPLAIN (postgres)                                                  |
 | `full-table-scan`              | WARNING  | Full table scan detected via EXPLAIN (mysql)                                                     |
 | `high-cost`                    | WARNING  | High cost operation in query plan                                                                |
+| `no-index-used`                | WARNING  | No index used for a table access detected via EXPLAIN (mysql)                                    |
+| `filesort`                     | INFO     | `Using filesort` in the query plan — `ORDER BY` not covered by an index (mysql)                  |
 
 ## Configuration
 

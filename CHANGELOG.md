@@ -19,13 +19,13 @@ Initial public release.
   (`Register` / `OpenDB`), so any query — including those issued by ORMs and
   query builders — is analyzed and you get back a real `*sql.DB`. Zero
   third-party dependencies in the core.
-- **Analyzer with 19 detection rules** across static, runtime, and EXPLAIN
+- **Analyzer with 21 detection rules** across static, runtime, and EXPLAIN
   surfaces: `select-star`, `leading-wildcard`, `non-sargable-predicate`,
   `add-not-null-without-default`, `implicit-join`, `cartesian-join`,
   `in-list-too-large`, `large-offset`, `select-distinct`, `delete-without-where`,
   `update-without-where`, `insert-without-columns`, `select-without-limit`,
   `orderby-without-limit`, `n-plus-one`, `slow-query`, `seq-scan`,
-  `full-table-scan`, `high-cost`.
+  `full-table-scan`, `high-cost`, `no-index-used`, `filesort`.
 - **Redaction by default**: every `Result.Query` is redacted (literals → `?`)
   before it leaves the process, and every `Result.Fingerprint` is a PII-free,
   low-cardinality query identity safe as a metric label. Opt out with

@@ -11,14 +11,21 @@ import (
 )
 
 // JSONReporter outputs analysis results as JSON.
+// The output writer is fixed at construction so Report is safe for concurrent
+// use (the writer cannot be swapped out from under an in-flight Report).
 type JSONReporter struct {
-	Out io.Writer
+	out io.Writer
 	mu  sync.Mutex
 }
 
 // NewJSONReporter creates a JSONReporter that writes to stderr.
 func NewJSONReporter() *JSONReporter {
-	return &JSONReporter{Out: os.Stderr}
+	return NewJSONReporterTo(os.Stderr)
+}
+
+// NewJSONReporterTo creates a JSONReporter that writes to w.
+func NewJSONReporterTo(w io.Writer) *JSONReporter {
+	return &JSONReporter{out: w}
 }
 
 type jsonResult struct {
@@ -51,7 +58,7 @@ func (j *JSONReporter) Report(results []analyzer.Result) {
 		}
 	}
 
-	enc := json.NewEncoder(j.Out)
+	enc := json.NewEncoder(j.out)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(out); err != nil {
 		// Fallback: log encoding failure since Reporter interface can't return error

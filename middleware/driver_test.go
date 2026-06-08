@@ -46,7 +46,7 @@ func newGuardedDB(t *testing.T, opts ...Option) *sql.DB {
 func guardedWithBuffer(t *testing.T, extra ...Option) (*sql.DB, *bytes.Buffer) {
 	t.Helper()
 	var buf bytes.Buffer
-	opts := append([]Option{WithReporter(&reporter.ConsoleReporter{Out: &buf})}, extra...)
+	opts := append([]Option{WithReporter(reporter.NewConsoleReporterTo(&buf))}, extra...)
 	return newGuardedDB(t, opts...), &buf
 }
 

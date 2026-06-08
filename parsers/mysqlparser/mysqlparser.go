@@ -17,6 +17,7 @@ package mysqlparser
 
 import (
 	"strconv"
+	"strings"
 
 	"github.com/KARTIKrocks/sqlguard/analyzer"
 	"github.com/xwb1989/sqlparser"
@@ -126,7 +127,9 @@ func hasRealFrom(from sqlparser.TableExprs) bool {
 			return true // join / subquery / etc. — a real source
 		}
 		if tn, ok := ate.Expr.(sqlparser.TableName); ok {
-			if tn.Name.String() == "dual" {
+			// Case-insensitive: sqlparser preserves the casing of backticked
+			// identifiers, so `DUAL` would otherwise read as a real table.
+			if strings.EqualFold(tn.Name.String(), "dual") {
 				continue
 			}
 		}

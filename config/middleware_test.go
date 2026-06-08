@@ -23,7 +23,7 @@ func TestMiddlewareOptionsAppliesProfile(t *testing.T) {
 	}
 
 	var buf strings.Builder
-	opts = append(opts, middleware.WithReporter(&reporter.ConsoleReporter{Out: &buf}))
+	opts = append(opts, middleware.WithReporter(reporter.NewConsoleReporterTo(&buf)))
 
 	name := "sqlguard-cfg-test"
 	if err := sqlguard.Register(name, "sqlite3", opts...); err != nil {

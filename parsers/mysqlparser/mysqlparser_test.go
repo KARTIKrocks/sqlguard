@@ -49,6 +49,21 @@ func TestParser_ExactStructuralFacts(t *testing.T) {
 			want: analyzer.Statement{Kind: analyzer.StmtSelect, HasFrom: false, Exact: true},
 		},
 		{
+			name: "explicit dual is not a real from",
+			sql:  "SELECT 1 FROM dual",
+			want: analyzer.Statement{Kind: analyzer.StmtSelect, HasFrom: false, Exact: true},
+		},
+		{
+			name: "uppercase DUAL is not a real from",
+			sql:  "SELECT 1 FROM DUAL",
+			want: analyzer.Statement{Kind: analyzer.StmtSelect, HasFrom: false, Exact: true},
+		},
+		{
+			name: "backticked DUAL is not a real from",
+			sql:  "SELECT 1 FROM `DUAL`",
+			want: analyzer.Statement{Kind: analyzer.StmtSelect, HasFrom: false, Exact: true},
+		},
+		{
 			name: "insert with columns",
 			sql:  "INSERT INTO users (name) VALUES ('a')",
 			want: analyzer.Statement{Kind: analyzer.StmtInsert, InsertColumnsListed: true, Exact: true},

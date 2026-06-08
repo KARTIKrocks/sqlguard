@@ -10,7 +10,7 @@ import (
 
 func TestConsoleReporter_Report(t *testing.T) {
 	var buf bytes.Buffer
-	rep := &ConsoleReporter{Out: &buf}
+	rep := NewConsoleReporterTo(&buf)
 
 	results := []analyzer.Result{
 		{
@@ -41,7 +41,7 @@ func TestConsoleReporter_Report(t *testing.T) {
 
 func TestConsoleReporter_CriticalSeverity(t *testing.T) {
 	var buf bytes.Buffer
-	rep := &ConsoleReporter{Out: &buf}
+	rep := NewConsoleReporterTo(&buf)
 
 	rep.Report([]analyzer.Result{{
 		RuleName: "delete-without-where",
@@ -57,7 +57,7 @@ func TestConsoleReporter_CriticalSeverity(t *testing.T) {
 
 func TestConsoleReporter_WithFileInfo(t *testing.T) {
 	var buf bytes.Buffer
-	rep := &ConsoleReporter{Out: &buf}
+	rep := NewConsoleReporterTo(&buf)
 
 	rep.Report([]analyzer.Result{{
 		RuleName: "select-star",
@@ -76,7 +76,7 @@ func TestConsoleReporter_WithFileInfo(t *testing.T) {
 
 func TestConsoleReporter_EmptyResults(t *testing.T) {
 	var buf bytes.Buffer
-	rep := &ConsoleReporter{Out: &buf}
+	rep := NewConsoleReporterTo(&buf)
 
 	rep.Report(nil)
 

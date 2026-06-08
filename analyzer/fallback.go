@@ -502,8 +502,9 @@ func stripComments(s string) string {
 }
 
 // copyStringLiteral writes the string literal that begins at s[i] (a quote
-// byte) verbatim, honoring ” / "" doubled-quote escapes, and returns the
-// index just past the literal.
+// byte) verbatim, treating a doubled quote (two of the same quote byte in a
+// row) as an escaped quote rather than the terminator, and returns the index
+// just past the literal.
 func copyStringLiteral(b *strings.Builder, s string, i int) int {
 	q := s[i]
 	b.WriteByte(q)
