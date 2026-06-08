@@ -1,0 +1,153 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# CodeRabbit configuration for sqlguard.
+# Docs: https://docs.coderabbit.ai/guides/configure-coderabbit
+#
+# The path_instructions below teach CodeRabbit this repo's non-obvious
+# invariants (from CLAUDE.md) so reviews are relevant and it does NOT flag
+# deliberate patterns (e.g. the //nolint deprecated database/sql delegations).
+
+language: en-US
+
+tone_instructions: >-
+  Reviewing sqlguard, a near-zero-dependency, security-conscious SQL analyzer
+  for Go. Be precise; prioritize correctness, hot-path allocations, concurrency
+  safety, and PII redaction. Pre-release: prefer clean redesign over compat shims.
+
+early_access: false
+
+reviews:
+  # assertive surfaces more issues — appropriate for a library aiming at a high
+  # bar. Switch to "chill" if reviews feel noisy.
+  profile: assertive
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: true
+  review_status: true
+  collapse_walkthrough: false
+  sequence_diagrams: true
+  changed_files_summary: true
+
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - main
+
+  # Don't spend review budget on build output or vendored trees.
+  path_filters:
+    - "!bin/**"
+    - "!dist/**"
+    - "!**/testdata/**"
+
+  path_instructions:
+    - path: "**/*.go"
+      instructions: >-
+        Go 1.26; modern idioms expected (range-over-int, `any`, compile-time
+        interface asserts `var _ I = (*T)(nil)`). Keep the core dependency-light:
+        analyzer, middleware and reporter must stay free of third-party deps and
+        of YAML. Flag new external imports in those packages. Watch for
+        allocations and unnecessary work on the per-query hot path
+        (analyzer.Analyze, middleware.Guard.Check). Code must be safe for
+        concurrent use where documented (Guard, QueryTracker, the caches).
+
+    - path: "analyzer/**"
+      instructions: >-
+        Redaction is the default and there is ONE canonical normalizer. Never
+        let raw literal values reach a Result that leaves the process:
+        Result.Query must be redacted unless rawQuery is explicitly set, and
+        Result.Fingerprint must always be PII-free/low-cardinality. Do NOT
+        introduce a second normalizer — everything funnels through Redact /
+        Fingerprint. The `analyzer` package must NOT import `config` or any YAML
+        library. Rules self-register via analyzer.Register in init(); a new rule
+        should be a RuleSpec registration, not a hand-maintained list. Rules read
+        the normalized Statement, never raw SQL.
+
+    - path: "middleware/**"
+      instructions: >-
+        middleware.Guard is the single analysis core (Check / CheckLatency /
+        Observe / ResetN1 / Analyzer). All interception points and every
+        integration must route through one Guard — flag any hand-rolled
+        check/latency logic that bypasses it (it silently loses redaction,
+        fingerprints, the parser seam, config, N+1, dedup and the analysis
+        cache). The analysis cache is keyed on the EXACT query string (not the
+        fingerprint) on purpose: a few rules read literal-derived facts the
+        fingerprint folds away. Cached result slices are shared/read-only — do
+        not mutate them (see Guard.report). Dedup and N+1 use bounded maps; keep
+        them bounded.
+
+    - path: "middleware/driver.go"
+      instructions: >-
+        This hand-implements the database/sql driver-wrapping chain
+        (Driver/DriverContext -> Connector -> Conn -> Stmt/Tx). The deprecated
+        delegations (base.Begin, legacy Queryer/Execer, Stmt.Exec/Query) are
+        DELIBERATE and carry //nolint:staticcheck — do NOT flag them or suggest
+        removing them; driver.Conn and driver.Stmt still require those methods,
+        and a faithful wrapper must delegate to whatever the base exposes. The
+        optional-interface forwarding (return driver.ErrSkip / documented no-op
+        when the base lacks an interface) preserves bare-driver behavior — do not
+        "simplify" it away. Analyze only on the path that actually executes
+        (never before an ErrSkip return) to avoid double-counting.
+
+    - path: "integrations/**"
+      instructions: >-
+        Each integration is a separate Go module so its heavy deps stay opt-in.
+        Every integration must build on the exported middleware.Guard
+        (pgxguard is the reference). Flag any integration that re-implements
+        analysis, redaction or N+1 by hand. Each should expose ResetN1() for
+        per-request scoping.
+
+    - path: "parsers/**"
+      instructions: >-
+        Optional real-grammar parsers, isolated in their own modules so heavy
+        parser deps never enter a consumer's build. A parser must never break the
+        caller's query path: on a parse failure return the FallbackParser's
+        best-effort Statement (Exact=false), not an error. The dialect parsers
+        derive structural facts from the AST but intentionally keep MaxInListLen,
+        ImplicitCommaJoin and CartesianJoin as fallback heuristics — that carve-
+        out is documented, not a bug.
+
+    - path: "config/**"
+      instructions: >-
+        `config` is the ONLY YAML-aware package; nothing else may import YAML and
+        nothing should depend on `config`. Parsing is lenient by default (unknown
+        keys/rules warn) unless strict:true — preserve that forward-compat
+        behavior so a newer config still loads on an older binary.
+
+    - path: "explain/**"
+      instructions: >-
+        EXPLAIN must never execute the statement: keep the read-only
+        BeginTx + always-Rollback, never use ANALYZE, and keep validate()'s
+        comment/string-aware multi-statement rejection and SELECT/WITH-only (DML
+        behind WithAllowDML) policy. EXPLAIN takes no bind params, so
+        concatenation is by design — the defense is validate() + the rolled-back
+        read-only tx; do not "fix" it with parameterization.
+
+    - path: "**/*_test.go"
+      instructions: >-
+        Use `-race` for anything touching middleware (driver chain, QueryTracker,
+        caches are concurrent). Tests for new behavior should also prove the
+        failure mode (e.g. a bug-reintroduction check) where practical. errcheck
+        is intentionally relaxed in tests.
+
+  # CodeRabbit can also run linters/scanners and fold results into the review.
+  tools:
+    golangci-lint:
+      enabled: true # uses the repo's .golangci.yml (v2 schema)
+    gitleaks:
+      enabled: true # secret scanning — important for a security-adjacent tool
+    yamllint:
+      enabled: true
+    actionlint:
+      enabled: true # lints .github/workflows/ci.yml
+    markdownlint:
+      enabled: true
+
+chat:
+  auto_reply: true
+
+knowledge_base:
+  learnings:
+    scope: auto
+  pull_requests:
+    scope: auto
