@@ -115,7 +115,10 @@ func newReporter(format string) (reporter.Reporter, error) {
 // dependency-free go/parser walk that still handles inline string literals, so
 // a broken or module-less tree is never silently skipped.
 func scanDir(dir string, a *analyzer.Analyzer, exclude func(string) bool) ([]analyzer.Result, int, error) {
-	absDir, _ := filepath.Abs(dir)
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return nil, 0, fmt.Errorf("cannot resolve absolute path: %w", err)
+	}
 
 	if results, n, ok := scanViaPackages(absDir, a, exclude); ok {
 		return results, n, nil
