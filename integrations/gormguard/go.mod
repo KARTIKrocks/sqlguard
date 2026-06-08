@@ -3,7 +3,7 @@ module github.com/KARTIKrocks/sqlguard/integrations/gormguard
 go 1.26
 
 require (
-	github.com/KARTIKrocks/sqlguard v0.0.0
+	github.com/KARTIKrocks/sqlguard v0.1.0
 	gorm.io/driver/sqlite v1.6.0
 	gorm.io/gorm v1.31.1
 )
@@ -14,5 +14,3 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.45 // indirect
 	golang.org/x/text v0.20.0 // indirect
 )
-
-replace github.com/KARTIKrocks/sqlguard => ../..
