@@ -7,4 +7,4 @@ require (
 	github.com/jmoiron/sqlx v1.4.0
 )
 
-require github.com/mattn/go-sqlite3 v1.14.45
+require github.com/mattn/go-sqlite3 v1.14.47
