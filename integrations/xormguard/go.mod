@@ -4,7 +4,7 @@ go 1.26
 
 require (
 	github.com/KARTIKrocks/sqlguard v0.1.0
-	github.com/mattn/go-sqlite3 v1.14.45
+	github.com/mattn/go-sqlite3 v1.14.47
 	xorm.io/xorm v1.3.11
 )
 
