@@ -3,7 +3,7 @@ module github.com/KARTIKrocks/sqlguard
 go 1.26
 
 require (
-	github.com/mattn/go-sqlite3 v1.14.45
+	github.com/mattn/go-sqlite3 v1.14.47
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/tools v0.46.0
 	gopkg.in/yaml.v3 v3.0.1
