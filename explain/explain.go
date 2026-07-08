@@ -144,6 +144,9 @@ func (p *PlanAnalyzer) analyzePostgres(ctx context.Context, query string) (*Resu
 	// unavoidable; safety comes from validate() plus the rolled-back,
 	// read-only transaction below. We never use EXPLAIN ANALYZE, so the
 	// statement is planned, not executed.
+	//nolint:gosec // G202: EXPLAIN takes no bind params, so concatenation is by
+	// design; the defense is validate() + the rolled-back read-only tx, not
+	// parameterization.
 	explainQuery := "EXPLAIN (FORMAT JSON) " + query
 
 	tx, err := p.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
@@ -215,6 +218,9 @@ func (p *PlanAnalyzer) walkPgPlan(node *pgPlanNode, query string, issues *[]anal
 func (p *PlanAnalyzer) analyzeMySQL(ctx context.Context, query string) (*Result, error) {
 	// See analyzePostgres: validated single statement, no ANALYZE, run in an
 	// always-rolled-back read-only transaction so EXPLAIN cannot mutate data.
+	//nolint:gosec // G202: EXPLAIN takes no bind params, so concatenation is by
+	// design; the defense is validate() + the rolled-back read-only tx, not
+	// parameterization.
 	explainQuery := "EXPLAIN " + query
 
 	tx, err := p.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})

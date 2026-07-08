@@ -192,6 +192,8 @@ func scanViaAST(dir, absDir string, a *analyzer.Analyzer, exclude func(string) b
 		}
 		f, perr := parser.ParseFile(fset, path, nil, parser.ParseComments)
 		if perr != nil {
+			//nolint:nilerr // an unparseable Go file is skipped, not fatal:
+			// keep walking the tree rather than aborting the whole scan.
 			return nil
 		}
 		totalFiles++

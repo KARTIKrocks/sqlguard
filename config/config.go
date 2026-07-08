@@ -87,6 +87,8 @@ func Default() *Config { return &Config{Version: 1} }
 // unknown top-level keys become warnings. If the file sets `strict: true`,
 // unknown keys are a hard error instead.
 func Load(path string) (*Config, error) {
+	//nolint:gosec // G304: reading the .sqlguard.yml the caller pointed us at
+	// (via Discover or an explicit --config) is the entire purpose of Load.
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("sqlguard config: %w", err)
