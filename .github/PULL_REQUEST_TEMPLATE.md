@@ -17,7 +17,7 @@ Closes #<!-- issue number, if any -->
 
 - [ ] `make ci` passes (fmt-check, vet, lint, test-race) across all modules
 - [ ] Added/updated tests (and, where practical, a failure-mode check)
-- [ ] Updated docs as needed (`README.md`, `CLAUDE.md`, `.sqlguard.example.yml`)
+- [ ] Updated docs as needed (`README.md`, `AGENTS.md`, `.sqlguard.example.yml`)
 - [ ] Added an entry under `## [Unreleased]` in `CHANGELOG.md`
 - [ ] No new third-party deps in `analyzer` / `middleware` / `reporter`
 - [ ] Findings stay redaction-safe (no raw literals leak into a `Result`)

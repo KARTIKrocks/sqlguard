@@ -53,8 +53,7 @@ Before opening a PR, run `make ci` and make sure it's green.
 - **Redaction is the default.** Never let raw literal values reach a `Result`
   that leaves the process. There is one canonical normalizer (`analyzer.Redact`
   / `Fingerprint`) — don't add a second.
-- See [`CLAUDE.md`](CLAUDE.md) for the deeper architecture notes and invariants,
-  and [`PRODUCTION_READINESS.md`](PRODUCTION_READINESS.md) for the roadmap.
+- See [`AGENTS.md`](AGENTS.md) for the deeper architecture notes and invariants.
 
 ## Adding a detection rule
 
@@ -78,7 +77,7 @@ integration should expose `ResetN1()` for per-request scoping.
 ## Pull requests
 
 1. Fork and branch from `main`.
-2. Keep changes focused; update docs (`README.md`, `CLAUDE.md`,
+2. Keep changes focused; update docs (`README.md`, `AGENTS.md`,
    `.sqlguard.example.yml`) when behavior or config changes.
 3. Add tests for new behavior; where practical, also prove the failure mode
    (e.g. a bug-reintroduction check).

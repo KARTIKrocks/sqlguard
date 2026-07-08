@@ -37,9 +37,6 @@ linters:
           - errcheck
           - gosec # test fixtures use lax file perms / ignore setup errors
         path: _test\.go
-      - linters:
-          - errcheck
-        path: examples/
 
 formatters:
   enable:

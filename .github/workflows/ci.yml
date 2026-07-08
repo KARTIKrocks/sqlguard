@@ -57,6 +57,22 @@ jobs:
 
   lint:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Each satellite carries its own go.mod, so golangci-lint at the root
+        # does NOT reach them — lint every module individually (same MODULES
+        # set the Makefile loops over).
+        module:
+          - .
+          - integrations/gormguard
+          - integrations/sqlxguard
+          - integrations/pgxguard
+          - integrations/bunguard
+          - integrations/xormguard
+          - integrations/entguard
+          - parsers/pgparser
+          - parsers/mysqlparser
     steps:
       - uses: actions/checkout@v7
         with:
@@ -68,7 +84,8 @@ jobs:
 
       - uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.11
+          version: v2.12.2
+          working-directory: ${{ matrix.module }}
           args: --timeout=5m
 
   build:
