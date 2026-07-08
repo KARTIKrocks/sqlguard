@@ -50,7 +50,10 @@ func (p *Parser) Parse(sql string) (*analyzer.Statement, error) {
 
 	ast, err := sqlparser.Parse(sql)
 	if err != nil || ast == nil {
-		return st, nil // keep best-effort fallback Statement
+		//nolint:nilerr // by contract a parse failure is non-fatal: return the
+		// best-effort fallback Statement (Exact=false), never an error, so a
+		// grammar the parser rejects can't break the caller's query path.
+		return st, nil
 	}
 
 	st.Kind = analyzer.StmtOther
