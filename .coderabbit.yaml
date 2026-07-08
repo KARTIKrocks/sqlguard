@@ -4,7 +4,7 @@
 # Docs: https://docs.coderabbit.ai/guides/configure-coderabbit
 #
 # The path_instructions below teach CodeRabbit this repo's non-obvious
-# invariants (from CLAUDE.md) so reviews are relevant and it does NOT flag
+# invariants (from AGENTS.md) so reviews are relevant and it does NOT flag
 # deliberate patterns (e.g. the //nolint deprecated database/sql delegations).
 
 language: en-US

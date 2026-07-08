@@ -23,9 +23,6 @@ linters:
       - linters:
           - errcheck
         path: _test\.go
-      - linters:
-          - errcheck
-        path: examples/
 
 formatters:
   enable:
