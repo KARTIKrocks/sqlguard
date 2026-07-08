@@ -12,16 +12,30 @@ linters:
     - gocyclo
     - revive
     - prealloc
+    # Security & correctness (sqlguard is a security-adjacent tool).
+    - gosec # SAST — SQL injection, unhandled crypto/file ops, etc.
+    - errorlint # correct error wrapping / errors.Is / errors.As usage
+    - bodyclose # response/rows bodies must be closed
+    - nilerr # returning nil after a non-nil error check
+    - unconvert # remove redundant type conversions
+    - usestdlibvars # prefer stdlib constants (http.MethodGet, sql.LevelReadOnly…)
   settings:
     gocyclo:
       min-complexity: 15
     revive:
       rules:
         - name: exported
+    gosec:
+      # G115 (integer overflow on conversion) is noisy on this codebase's
+      # deliberate, range-checked int/int64 conversions; the real SQL-injection
+      # and file/crypto checks (G201/G202/G3xx/G4xx) stay on.
+      excludes:
+        - G115
   exclusions:
     rules:
       - linters:
           - errcheck
+          - gosec # test fixtures use lax file perms / ignore setup errors
         path: _test\.go
       - linters:
           - errcheck
