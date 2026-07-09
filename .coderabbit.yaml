@@ -130,8 +130,10 @@ reviews:
         The MySQL plan is requested as `EXPLAIN FORMAT=TRADITIONAL` because
         MySQL 9 defaults @@explain_format to TREE (one free-text column); do not
         drop the clause. Plan columns are addressed BY NAME, never by position:
-        MariaDB emits 10 columns where MySQL emits 12. Rows whose `table` starts
-        with `<` are UNION RESULT / derived temporary tables and are skipped on
+        MariaDB emits 10 columns where MySQL emits 12. The required-column check
+        after rows.Columns() makes an unrecognized plan shape a hard error rather
+        than a silent zero-issue result; keep it. Rows whose `table` starts with
+        `<` are UNION RESULT / derived temporary tables and are skipped on
         purpose. Deliberate carve-out: explain keeps Result.Query (and the inner
         analyzer.Result.Query of its findings) RAW — the user typed the query on
         their own CLI, it never reaches a log/telemetry sink, and Fingerprint is

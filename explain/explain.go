@@ -266,6 +266,16 @@ func (p *PlanAnalyzer) analyzeMySQL(ctx context.Context, query string, dml bool)
 	for i, c := range cols {
 		index[strings.ToLower(c)] = i
 	}
+	// Fail closed on an unrecognized plan shape. If a future server ignores
+	// FORMAT=TRADITIONAL the way MySQL 9 ignores a bare EXPLAIN, every lookup
+	// below would return "" and Analyze would report zero issues — a silent
+	// false negative is worse than an error. `rows` is not required: it only
+	// decorates a message.
+	for _, want := range []string{"table", "type", "key", "possible_keys", "extra"} {
+		if _, ok := index[want]; !ok {
+			return nil, fmt.Errorf("explain: unrecognized MySQL EXPLAIN plan (missing %q column; got %v)", want, cols)
+		}
+	}
 	cells := make([]sql.NullString, len(cols))
 	scanArgs := make([]any, len(cols))
 	for i := range cells {

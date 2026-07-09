@@ -61,11 +61,17 @@ func connect(t *testing.T, env, driver string) *sql.DB {
 	return db
 }
 
-// exec runs each statement in order, failing the test on the first error.
+// exec runs each statement in order, failing the test on the first error. Each
+// statement carries its own deadline, so a wedged server surfaces as a context
+// error rather than hanging until the suite-wide test timeout. The context is
+// not tied to t via testCtx, so exec is also safe to call from a t.Cleanup.
 func exec(t *testing.T, db *sql.DB, stmts ...string) {
 	t.Helper()
 	for _, s := range stmts {
-		if _, err := db.ExecContext(context.Background(), s); err != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		_, err := db.ExecContext(ctx, s)
+		cancel()
+		if err != nil {
 			t.Fatalf("exec %q: %v", s, err)
 		}
 	}

@@ -33,6 +33,10 @@ failed on every query. No public API changed.
 - **False positive on `UNION`**: a `UNION RESULT` row names a temporary table
   (`<union1,2>`) with `type=ALL` and no key, and was reported as an unindexed
   full table scan. Rows naming a derived or temporary table are now skipped.
+- **Fails closed on an unrecognized MySQL plan**: if the server returns a plan
+  without the expected columns, `Analyze` now returns an error naming the
+  missing column instead of silently reporting zero issues. A false negative in
+  a query linter is worse than a hard failure.
 
 ### Added
 
