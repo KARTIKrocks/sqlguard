@@ -28,6 +28,9 @@ jobs:
         with:
           go-version: ${{ matrix.go-version }}
 
+      # The committed go.work makes the satellite steps below compile against
+      # this commit's core, not the published one, so a breaking change here
+      # fails them rather than passing CI silently.
       - name: Run tests
         run: go test ./... -count=1 -race
 
@@ -54,6 +57,62 @@ jobs:
 
       - name: Test parsers (mysqlparser)
         run: cd parsers/mysqlparser && go test ./... -count=1 -race
+
+  # Exercises explain/ against live servers. The tabular EXPLAIN output it
+  # parses is version-dependent (MySQL 9 defaults @@explain_format to TREE;
+  # MariaDB emits 10 columns where MySQL emits 12), so this cannot be covered
+  # by unit tests. Service containers mirror test/integration/docker-compose.yml.
+  integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18.3-alpine
+        env:
+          POSTGRES_USER: sqlguard
+          POSTGRES_PASSWORD: sqlguard
+          POSTGRES_DB: sqlguard
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U sqlguard -d sqlguard"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+      mysql:
+        image: mysql:9.7.1
+        env:
+          MYSQL_ROOT_PASSWORD: sqlguard
+          MYSQL_DATABASE: sqlguard
+        ports:
+          - 53306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -psqlguard"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+      mariadb:
+        image: mariadb:12.3.2
+        env:
+          MARIADB_ROOT_PASSWORD: sqlguard
+          MARIADB_DATABASE: sqlguard
+        ports:
+          - 53307:3306
+        options: >-
+          --health-cmd "mariadb-admin ping -h 127.0.0.1 -uroot -psqlguard"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+
+      - name: Run integration tests
+        run: make test-integration
 
   lint:
     runs-on: ubuntu-latest

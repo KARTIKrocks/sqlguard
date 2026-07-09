@@ -255,13 +255,23 @@ sqlguard explain --db "..." --format json "SELECT * FROM orders"
 
 Detects sequential scans, missing indexes, filesort, and high-cost operations.
 
-For safety the EXPLAIN runs inside a **read-only transaction that is always
-rolled back** (Postgres and MySQL), and `ANALYZE` is never used — the
-statement is planned, never executed. Input is validated with a
-comment- and string-literal-aware multi-statement check (a `;` hidden in a
-comment or string can't smuggle a second statement). Only `SELECT`/`WITH` is
-allowed by default; pass `--allow-dml` to EXPLAIN an `INSERT/UPDATE/DELETE`
-(still rolled back). DDL/`SET`/transaction-control is always refused.
+For safety the EXPLAIN runs inside a **transaction that is always rolled back**,
+and `ANALYZE` is never used — the statement is planned, never executed. Input
+is validated with a comment- and string-literal-aware multi-statement check (a
+`;` hidden in a comment or string can't smuggle a second statement). Only
+`SELECT`/`WITH` is allowed by default; pass `--allow-dml` to EXPLAIN an
+`INSERT/UPDATE/DELETE` (still rolled back). DDL/`SET`/transaction-control is
+always refused.
+
+The transaction is additionally **read-only** everywhere except MySQL/MariaDB
+under `--allow-dml`: those servers reject *every* statement in a read-only
+transaction (error 1792), including an EXPLAIN that only plans it. There the
+guarantee rests on the validation, on plain `EXPLAIN` never executing the
+statement, and on the unconditional rollback.
+
+MariaDB works through `--dialect mysql`. The MySQL plan is requested as
+`EXPLAIN FORMAT=TRADITIONAL`, since MySQL 9 defaults `@@explain_format` to
+`TREE`.
 
 ### GORM Integration
 
@@ -509,7 +519,7 @@ per-request scoping.
   constant concatenation, and `fmt.Sprintf` with a constant format string
   (via `go/types`); it cannot resolve values only known at runtime.
 - The default fallback parser is best-effort; for exact structural analysis use a real parser module (see _SQL Parsers_ above)
-- EXPLAIN analyzer requires a live database connection; only Postgres and MySQL dialects are supported
+- EXPLAIN analyzer requires a live database connection; only the `postgres` and `mysql` dialects are supported (`mysql` also covers MariaDB)
 
 ## License
 

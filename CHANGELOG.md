@@ -9,6 +9,54 @@ the same version in lockstep.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-07-09
+
+Fixes `explain` against current MySQL and MariaDB servers, where it previously
+failed on every query. No public API changed.
+
+### Fixed
+
+- **`explain` on MySQL 9**: the plan is now requested as
+  `EXPLAIN FORMAT=TRADITIONAL`. MySQL 9 defaults `@@explain_format` to `TREE`,
+  which returns a single free-text column instead of the tabular plan, so every
+  `Analyze` call failed to scan. The clause is also accepted by MySQL 5.7/8 and
+  MariaDB, so no server version detection is needed.
+- **`explain` on MariaDB**: plan columns are read by name rather than by
+  position. MariaDB emits ten columns where MySQL emits twelve (no
+  `partitions`, no `filtered`), which made the positional scan fail.
+- **`WithAllowDML` on MySQL and MariaDB**: both reject *every* statement inside
+  a `READ ONLY` transaction (error 1792), including an `EXPLAIN` that only plans
+  it. The MySQL path now uses a regular transaction; safety still comes from
+  input validation, plain `EXPLAIN` never executing the statement, and the
+  transaction always being rolled back. PostgreSQL is unaffected and keeps its
+  read-only transaction.
+- **False positive on `UNION`**: a `UNION RESULT` row names a temporary table
+  (`<union1,2>`) with `type=ALL` and no key, and was reported as an unindexed
+  full table scan. Rows naming a derived or temporary table are now skipped.
+- **Fails closed on an unrecognized MySQL plan**: if the server returns a plan
+  without the expected columns, `Analyze` now returns an error naming the
+  missing column instead of silently reporting zero issues. A false negative in
+  a query linter is worse than a hard failure.
+
+### Added
+
+- `test/integration`: an unpublished module that runs `explain` against live
+  PostgreSQL, MySQL and MariaDB (`make db-up && make test-integration`). The
+  tabular `EXPLAIN` output it parses is version-dependent, so no unit test can
+  guard these regressions. Kept as its own module so the database drivers stay
+  out of the core import graph, and behind an `integration` build tag so the
+  default `go test ./...` needs no Docker.
+
+### Changed
+
+- Local development now uses a committed `go.work` instead of per-module
+  `replace` directives. Without it the satellite modules compiled against the
+  *published* core even in CI, so a breaking change to `analyzer/` or
+  `middleware/` could pass a green build. Consumers are unaffected; use
+  `GOWORK=off` to reproduce a consumer's build. `make release-prep` and its
+  `replace`-restoring dance are gone — releasing is documented in
+  `CONTRIBUTING.md`.
+
 ## [0.1.0] - 2026-06-08
 
 Initial public release.
@@ -57,5 +105,6 @@ Initial public release.
   `integrations/sqlxguard`, `integrations/pgxguard` (native pgx / pgxpool),
   `integrations/bunguard`, `integrations/xormguard`, `integrations/entguard`.
 
-[Unreleased]: https://github.com/KARTIKrocks/sqlguard/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/KARTIKrocks/sqlguard/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/KARTIKrocks/sqlguard/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/KARTIKrocks/sqlguard/releases/tag/v0.1.0

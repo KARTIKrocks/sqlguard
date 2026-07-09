@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/KARTIKrocks/sqlguard/analyzer"
@@ -62,7 +63,7 @@ type Result struct {
 // always-rolled-back transaction, so a query passed here cannot mutate the
 // target database.
 func (p *PlanAnalyzer) Analyze(ctx context.Context, query string) (*Result, error) {
-	safe, err := p.validate(query)
+	safe, kind, err := p.validate(query)
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +73,7 @@ func (p *PlanAnalyzer) Analyze(ctx context.Context, query string) (*Result, erro
 	case "postgres":
 		res, err = p.analyzePostgres(ctx, safe)
 	case "mysql":
-		res, err = p.analyzeMySQL(ctx, safe)
+		res, err = p.analyzeMySQL(ctx, safe, isDML(kind))
 	default:
 		return nil, fmt.Errorf("explain: unsupported dialect %q", p.dialect)
 	}
@@ -102,27 +103,37 @@ func (p *PlanAnalyzer) Analyze(ctx context.Context, query string) (*Result, erro
 //   - Classify the statement via the same parser the analyzer uses. Only
 //     SELECT/WITH are allowed by default; INSERT/UPDATE/DELETE require
 //     WithAllowDML; DDL/SET/other is always refused.
-func (p *PlanAnalyzer) validate(query string) (string, error) {
+func (p *PlanAnalyzer) validate(query string) (string, analyzer.StmtKind, error) {
 	q := strings.TrimSpace(query)
 	if q == "" {
-		return "", fmt.Errorf("explain: refusing to explain an empty query")
+		return "", analyzer.StmtUnknown, fmt.Errorf("explain: refusing to explain an empty query")
 	}
 	if analyzer.IsMultiStatement(q) {
-		return "", fmt.Errorf("explain: refusing to explain multi-statement input")
+		return "", analyzer.StmtUnknown, fmt.Errorf("explain: refusing to explain multi-statement input")
 	}
 	q = strings.TrimRight(q, "; \t\r\n")
 
 	st, _ := analyzer.NewFallbackParser().Parse(q)
 	switch st.Kind {
 	case analyzer.StmtSelect:
-		return q, nil
+		return q, st.Kind, nil
 	case analyzer.StmtInsert, analyzer.StmtUpdate, analyzer.StmtDelete:
 		if !p.allowDML {
-			return "", fmt.Errorf("explain: refusing to EXPLAIN a data-modifying statement by default; construct the analyzer with explain.WithAllowDML to opt in")
+			return "", st.Kind, fmt.Errorf("explain: refusing to EXPLAIN a data-modifying statement by default; construct the analyzer with explain.WithAllowDML to opt in")
 		}
-		return q, nil
+		return q, st.Kind, nil
 	default:
-		return "", fmt.Errorf("explain: refusing to explain a non-SELECT/WITH/DML statement (DDL, SET, transaction control, or unrecognized)")
+		return "", st.Kind, fmt.Errorf("explain: refusing to explain a non-SELECT/WITH/DML statement (DDL, SET, transaction control, or unrecognized)")
+	}
+}
+
+// isDML reports whether kind is a data-modifying statement.
+func isDML(kind analyzer.StmtKind) bool {
+	switch kind {
+	case analyzer.StmtInsert, analyzer.StmtUpdate, analyzer.StmtDelete:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -215,17 +226,27 @@ func (p *PlanAnalyzer) walkPgPlan(node *pgPlanNode, query string, issues *[]anal
 	}
 }
 
-func (p *PlanAnalyzer) analyzeMySQL(ctx context.Context, query string) (*Result, error) {
+func (p *PlanAnalyzer) analyzeMySQL(ctx context.Context, query string, dml bool) (*Result, error) {
 	// See analyzePostgres: validated single statement, no ANALYZE, run in an
-	// always-rolled-back read-only transaction so EXPLAIN cannot mutate data.
+	// always-rolled-back transaction so EXPLAIN cannot mutate data.
+	//
+	// FORMAT=TRADITIONAL pins the tabular plan. MySQL 9 defaults
+	// @@explain_format to TREE, which yields one free-text column and no
+	// per-table rows to inspect; the clause restores the classic output and is
+	// also accepted by MySQL 5.7/8 and MariaDB.
+	//
 	//nolint:gosec // G202: EXPLAIN takes no bind params, so concatenation is by
-	// design; the defense is validate() + the rolled-back read-only tx, not
+	// design; the defense is validate() + the rolled-back tx, not
 	// parameterization.
-	explainQuery := "EXPLAIN " + query
+	explainQuery := "EXPLAIN FORMAT=TRADITIONAL " + query
 
-	tx, err := p.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	// MySQL and MariaDB reject *any* statement inside a READ ONLY transaction
+	// (error 1792), including an EXPLAIN that only plans it. Fall back to a
+	// regular transaction for DML: plain EXPLAIN never executes the statement,
+	// and the rollback below is what guarantees nothing is committed.
+	tx, err := p.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: !dml})
 	if err != nil {
-		return nil, fmt.Errorf("explain: failed to begin read-only transaction: %w", err)
+		return nil, fmt.Errorf("explain: failed to begin transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -235,62 +256,47 @@ func (p *PlanAnalyzer) analyzeMySQL(ctx context.Context, query string) (*Result,
 	}
 	defer func() { _ = rows.Close() }()
 
+	// MySQL emits 12 columns, MariaDB 10 (no `partitions`, no `filtered`).
+	// Address them by name so a differing column set is not a scan error.
+	cols, err := rows.Columns()
+	if err != nil {
+		return nil, fmt.Errorf("explain: failed to read EXPLAIN columns: %w", err)
+	}
+	index := make(map[string]int, len(cols))
+	for i, c := range cols {
+		index[strings.ToLower(c)] = i
+	}
+	// Fail closed on an unrecognized plan shape. If a future server ignores
+	// FORMAT=TRADITIONAL the way MySQL 9 ignores a bare EXPLAIN, every lookup
+	// below would return "" and Analyze would report zero issues — a silent
+	// false negative is worse than an error. `rows` is not required: it only
+	// decorates a message.
+	for _, want := range []string{"table", "type", "key", "possible_keys", "extra"} {
+		if _, ok := index[want]; !ok {
+			return nil, fmt.Errorf("explain: unrecognized MySQL EXPLAIN plan (missing %q column; got %v)", want, cols)
+		}
+	}
+	cells := make([]sql.NullString, len(cols))
+	scanArgs := make([]any, len(cols))
+	for i := range cells {
+		scanArgs[i] = &cells[i]
+	}
+	col := func(name string) string {
+		if i, ok := index[name]; ok {
+			return cells[i].String
+		}
+		return ""
+	}
+
 	result := &Result{
 		Query: query,
 	}
 
 	for rows.Next() {
-		var (
-			id           int
-			selectType   string
-			table        sql.NullString
-			partitions   sql.NullString
-			accessType   sql.NullString
-			possibleKeys sql.NullString
-			key          sql.NullString
-			keyLen       sql.NullString
-			ref          sql.NullString
-			rowCount     sql.NullInt64
-			filtered     sql.NullFloat64
-			extra        sql.NullString
-		)
-
-		if err := rows.Scan(&id, &selectType, &table, &partitions, &accessType, &possibleKeys, &key, &keyLen, &ref, &rowCount, &filtered, &extra); err != nil {
+		if err := rows.Scan(scanArgs...); err != nil {
 			return result, fmt.Errorf("explain: failed to scan row: %w", err)
 		}
-
-		// Detect full table scans (type = ALL)
-		if accessType.Valid && accessType.String == "ALL" {
-			result.Issues = append(result.Issues, analyzer.Result{
-				RuleName:   "full-table-scan",
-				Severity:   analyzer.SeverityWarning,
-				Query:      query,
-				Message:    fmt.Sprintf("Full table scan on %s (estimated %d rows)", table.String, rowCount.Int64),
-				Suggestion: "Consider adding an index to avoid full table scan.",
-			})
-		}
-
-		// Detect missing indexes
-		if (!key.Valid || key.String == "") && (!possibleKeys.Valid || possibleKeys.String == "") && table.Valid && table.String != "" {
-			result.Issues = append(result.Issues, analyzer.Result{
-				RuleName:   "no-index-used",
-				Severity:   analyzer.SeverityWarning,
-				Query:      query,
-				Message:    fmt.Sprintf("No index used on table %s", table.String),
-				Suggestion: "Consider adding an index on the filtered/joined columns.",
-			})
-		}
-
-		// Detect filesort
-		if strings.Contains(extra.String, "Using filesort") {
-			result.Issues = append(result.Issues, analyzer.Result{
-				RuleName:   "filesort",
-				Severity:   analyzer.SeverityInfo,
-				Query:      query,
-				Message:    fmt.Sprintf("Filesort detected on table %s", table.String),
-				Suggestion: "Consider adding an index that covers the ORDER BY columns.",
-			})
-		}
+		result.Issues = append(result.Issues, mysqlRowIssues(query, col)...)
 	}
 
 	if err := rows.Err(); err != nil {
@@ -298,4 +304,54 @@ func (p *PlanAnalyzer) analyzeMySQL(ctx context.Context, query string) (*Result,
 	}
 
 	return result, nil
+}
+
+// mysqlRowIssues applies the plan rules to a single EXPLAIN row. col resolves a
+// lower-cased column name to its value, or "" when the server does not emit it.
+func mysqlRowIssues(query string, col func(string) string) []analyzer.Result {
+	// A UNION RESULT or derived-table row names a temporary table such as
+	// `<union1,2>`, never a real one. It has no index by construction, so the
+	// rules below would only produce noise.
+	table := col("table")
+	if table == "" || strings.HasPrefix(table, "<") {
+		return nil
+	}
+
+	var issues []analyzer.Result
+
+	// Detect full table scans (type = ALL)
+	if col("type") == "ALL" {
+		planRows, _ := strconv.ParseInt(col("rows"), 10, 64)
+		issues = append(issues, analyzer.Result{
+			RuleName:   "full-table-scan",
+			Severity:   analyzer.SeverityWarning,
+			Query:      query,
+			Message:    fmt.Sprintf("Full table scan on %s (estimated %d rows)", table, planRows),
+			Suggestion: "Consider adding an index to avoid full table scan.",
+		})
+	}
+
+	// Detect missing indexes
+	if col("key") == "" && col("possible_keys") == "" {
+		issues = append(issues, analyzer.Result{
+			RuleName:   "no-index-used",
+			Severity:   analyzer.SeverityWarning,
+			Query:      query,
+			Message:    fmt.Sprintf("No index used on table %s", table),
+			Suggestion: "Consider adding an index on the filtered/joined columns.",
+		})
+	}
+
+	// Detect filesort
+	if strings.Contains(col("extra"), "Using filesort") {
+		issues = append(issues, analyzer.Result{
+			RuleName:   "filesort",
+			Severity:   analyzer.SeverityInfo,
+			Query:      query,
+			Message:    fmt.Sprintf("Filesort detected on table %s", table),
+			Suggestion: "Consider adding an index that covers the ORDER BY columns.",
+		})
+	}
+
+	return issues
 }
