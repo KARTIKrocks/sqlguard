@@ -3,7 +3,7 @@ module github.com/KARTIKrocks/sqlguard/integrations/xormguard
 go 1.26
 
 require (
-	github.com/KARTIKrocks/sqlguard v0.1.0
+	github.com/KARTIKrocks/sqlguard v0.1.1
 	github.com/mattn/go-sqlite3 v1.14.47
 	xorm.io/xorm v1.4.1
 )
