@@ -2,7 +2,7 @@ module github.com/KARTIKrocks/sqlguard/parsers/pgparser
 
 go 1.26
 
-require github.com/KARTIKrocks/sqlguard v0.1.0
+require github.com/KARTIKrocks/sqlguard v0.1.1
 
 require (
 	github.com/google/go-cmp v0.6.0 // indirect
