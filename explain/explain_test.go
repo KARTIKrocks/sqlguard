@@ -31,7 +31,7 @@ func TestValidate(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			p := &PlanAnalyzer{dialect: "postgres", allowDML: c.allowDML}
-			safe, err := p.validate(c.query)
+			safe, _, err := p.validate(c.query)
 			if c.wantErr == "" {
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)

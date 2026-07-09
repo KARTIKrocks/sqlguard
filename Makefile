@@ -1,11 +1,10 @@
 GOLANGCI_LINT_VERSION := v2.12.2
 GOIMPORTS_VERSION := v0.45.0
 
-MODULE_PATH := github.com/KARTIKrocks/sqlguard
-
 # Sub-modules carry their own go.mod (heavy/opt-in deps kept out of the core
 # import graph). `go test ./...` from root does NOT reach them, so every
-# all-modules target loops over MODULES.
+# all-modules target loops over MODULES. They compile against this tree rather
+# than the published core because go.work lists them all.
 SUB_MODULES = \
 	./integrations/gormguard \
 	./integrations/sqlxguard \
@@ -17,7 +16,19 @@ SUB_MODULES = \
 	./parsers/mysqlparser
 MODULES = . $(SUB_MODULES)
 
-.PHONY: all help setup deps ci test test-v test-race coverage lint lint-fix fix fmt fmt-check vet tidy build cli install bench clean release-prep
+# The integration module is never released, so it is not in SUB_MODULES. Its
+# tests sit behind the `integration` build tag and need the compose stack
+# below, so it is also excluded from the plain vet/test loops.
+INTEGRATION_MODULE := ./test/integration
+COMPOSE_FILE := test/integration/docker-compose.yml
+
+# Override to point the integration tests at your own servers. An unset DSN
+# skips that database's tests rather than failing them.
+SQLGUARD_TEST_PG_DSN ?= postgres://sqlguard:sqlguard@localhost:55432/sqlguard?sslmode=disable
+SQLGUARD_TEST_MYSQL_DSN ?= root:sqlguard@tcp(localhost:53306)/sqlguard
+SQLGUARD_TEST_MARIADB_DSN ?= root:sqlguard@tcp(localhost:53307)/sqlguard
+
+.PHONY: all help setup deps ci test test-v test-race coverage lint lint-fix fix fmt fmt-check vet tidy build cli install bench clean db-up db-down test-integration vet-integration
 
 all: tidy fmt vet lint build test
 
@@ -31,6 +42,9 @@ help:
 	@echo "  test          - Run tests across all modules"
 	@echo "  test-v        - Run tests with verbose output (all modules)"
 	@echo "  test-race     - Run tests with race detector (all modules)"
+	@echo "  db-up         - Start the integration-test databases (docker compose)"
+	@echo "  db-down       - Stop the integration-test databases and drop volumes"
+	@echo "  test-integration - Run explain/ tests against the live databases"
 	@echo "  coverage      - Run tests with merged coverage report (all modules)"
 	@echo "  vet           - Run go vet (all modules)"
 	@echo "  lint          - Run golangci-lint (all modules)"
@@ -44,7 +58,6 @@ help:
 	@echo "  install       - Install the CLI to \$$GOPATH/bin"
 	@echo "  bench         - Run benchmarks (all modules)"
 	@echo "  clean         - Remove build/coverage artifacts"
-	@echo "  release-prep  - Pin sub-modules to a release version (VERSION=vX.Y.Z)"
 
 ## Install development tools (skips if already present)
 setup:
@@ -103,6 +116,29 @@ test-race:
 		echo "==> Testing (race) $$mod"; \
 		(cd $$mod && go test -race -count=1 ./...) || exit 1; \
 	done
+
+## Start the integration-test databases and wait for them to become healthy
+db-up:
+	docker compose -f $(COMPOSE_FILE) up -d --wait
+
+## Stop the integration-test databases and remove their volumes
+db-down:
+	docker compose -f $(COMPOSE_FILE) down -v
+
+## Run the explain/ integration tests against live Postgres, MySQL and MariaDB.
+## Requires `make db-up` first. Each database's tests skip if its DSN is unset.
+test-integration:
+	@echo "==> Integration testing $(INTEGRATION_MODULE)"
+	@cd $(INTEGRATION_MODULE) && \
+		SQLGUARD_TEST_PG_DSN='$(SQLGUARD_TEST_PG_DSN)' \
+		SQLGUARD_TEST_MYSQL_DSN='$(SQLGUARD_TEST_MYSQL_DSN)' \
+		SQLGUARD_TEST_MARIADB_DSN='$(SQLGUARD_TEST_MARIADB_DSN)' \
+		go test -tags=integration -count=1 -race ./...
+
+## Vet the integration module (needs the build tag to see any files)
+vet-integration:
+	@echo "==> Vetting $(INTEGRATION_MODULE)"
+	@cd $(INTEGRATION_MODULE) && go vet -tags=integration ./...
 
 ## Run tests with coverage and generate a merged report across all modules
 coverage:
@@ -166,29 +202,3 @@ clean:
 	@find . -name cover.tmp -delete 2>/dev/null || true
 	@rm -rf dist/ build/ bin/
 
-## Prepare sub-modules for release: drop the local replace and pin the parent
-## version. Usage: make release-prep VERSION=v0.1.0
-## Run this AFTER the root module tag for VERSION exists and is pushed, then
-## commit and tag the sub-modules. Restore replaces afterwards for local dev
-## (git checkout -- '**/go.mod') or develop against the published version.
-release-prep:
-ifndef VERSION
-	$(error VERSION is required. Usage: make release-prep VERSION=v0.1.0)
-endif
-	@for mod in $(SUB_MODULES); do \
-		echo "==> release-prep $$mod"; \
-		(cd $$mod && go mod edit -dropreplace $(MODULE_PATH) -require $(MODULE_PATH)@$(VERSION)) || exit 1; \
-	done
-	@echo ""
-	@echo "Done! Sub-modules now require $(MODULE_PATH)@$(VERSION) (replace dropped)."
-	@echo "Next steps (root tag $(VERSION) must already be pushed):"
-	@echo "  git add -A && git commit -m 'Prepare release $(VERSION)'"
-	@echo "  git tag integrations/gormguard/$(VERSION)"
-	@echo "  git tag integrations/sqlxguard/$(VERSION)"
-	@echo "  git tag integrations/pgxguard/$(VERSION)"
-	@echo "  git tag integrations/bunguard/$(VERSION)"
-	@echo "  git tag integrations/xormguard/$(VERSION)"
-	@echo "  git tag integrations/entguard/$(VERSION)"
-	@echo "  git tag parsers/pgparser/$(VERSION)"
-	@echo "  git tag parsers/mysqlparser/$(VERSION)"
-	@echo "  git push origin main --tags"

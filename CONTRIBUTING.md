@@ -15,8 +15,15 @@ lockstep:
 - **`integrations/{gormguard,sqlxguard,pgxguard,bunguard,xormguard,entguard}`** —
   ORM/driver adapters, each a separate module so its deps stay opt-in.
 
-The satellite modules use a local `replace` directive pointing at the root, so
-you can develop across modules without publishing.
+Every satellite `require`s a published version of the core. The committed
+`go.work` at the repo root overrides that with the working tree, so you can
+develop across modules without publishing — and so a breaking change to
+`analyzer/` or `middleware/` fails the satellite tests instead of passing CI
+against a stale published core.
+
+No `go.mod` in this repo carries a `replace` directive; `go.work` is the only
+place local resolution is configured. It is ignored entirely when someone
+depends on these modules. To reproduce a consumer's build, set `GOWORK=off`.
 
 > **Important:** `go test ./...` (and `go build` / `go vet` / `go mod tidy`)
 > from the root does **not** reach the satellite modules. Always use the
@@ -39,6 +46,51 @@ Before opening a PR, run `make ci` and make sure it's green.
   `QueryTracker` are concurrent).
 - After any dependency change, run `make tidy` (tidies all nine modules — tidying
   only the root leaves the others stale).
+
+## Integration tests
+
+`explain/` parses real `EXPLAIN` output, whose shape varies by server and
+version — MySQL 9 defaults `@@explain_format` to `TREE`, and MariaDB emits ten
+plan columns where MySQL emits twelve. No unit test can catch a regression
+there, so `test/integration/` runs the analyzer against live databases:
+
+```bash
+make db-up            # postgres 18, mysql 9.7, mariadb 12.3 via docker compose
+make test-integration
+make db-down          # stop and drop the volumes
+```
+
+The tests sit behind the `integration` build tag, so `make test` and `make ci`
+never need Docker. Each database's tests skip when its DSN environment variable
+is unset (`SQLGUARD_TEST_PG_DSN`, `SQLGUARD_TEST_MYSQL_DSN`,
+`SQLGUARD_TEST_MARIADB_DSN`), so a partial stack still runs what it can — and
+you can point any of them at your own server by overriding the variable.
+
+`test/integration/` is a tenth module that is never published: it exists to keep
+the Postgres and MySQL drivers out of the core module's import graph.
+
+## Releasing
+
+Tag the root module first, then point each satellite at that tag. Everything
+here is safe to commit to `main` — `go.work` keeps local builds on the working
+tree no matter which core version the satellites require.
+
+```bash
+git tag vX.Y.Z && git push origin vX.Y.Z    # root module first
+
+for mod in integrations/* parsers/*; do
+  (cd "$mod" && go mod edit -require github.com/KARTIKrocks/sqlguard@vX.Y.Z)
+done
+make tidy && make test
+
+git commit -am 'Pin sub-modules to vX.Y.Z'
+for mod in integrations/* parsers/*; do git tag "$mod/vX.Y.Z"; done
+git push origin --tags
+```
+
+Skip `test/integration/` — it is not published. Before tagging, it is worth
+running `GOWORK=off make test` once: that is what a consumer's build sees, and
+it will catch a satellite whose required core version predates an API it uses.
 
 ## Conventions
 

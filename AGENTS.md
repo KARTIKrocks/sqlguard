@@ -18,7 +18,8 @@ loop so a target can't silently skip a satellite.
 - `make lint` — `golangci-lint run` in every module (config in `.golangci.yml`, v2 schema). `make fmt` / `make fmt-check` run `gofmt -s` + `goimports`.
 - `make tidy` — `go mod tidy` across all nine modules. Run after any dependency change; tidying only the root leaves the others stale.
 - `make setup` — installs pinned `golangci-lint` / `goimports` if missing (a prereq of `lint`/`fmt`).
-- `make release-prep VERSION=vX.Y.Z` — drops the local `replace` and pins each sub-module to the tagged parent version, then prints the per-module tag commands.
+- The committed `go.work` makes every satellite compile against this tree, not the published core it `require`s — so a breaking change to `analyzer/`/`middleware/` fails their tests. No `go.mod` here has a `replace`. Use `GOWORK=off` to see a consumer's build. Releasing is manual (see CONTRIBUTING.md).
+- `make db-up` / `make test-integration` / `make db-down` — run `explain/` against live Postgres, MySQL and MariaDB (`test/integration/`, behind the `integration` build tag).
 
 CI (`.github/workflows/ci.yml`) runs the root and each satellite module individually too.
 

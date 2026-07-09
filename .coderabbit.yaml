@@ -95,7 +95,9 @@ reviews:
         Every integration must build on the exported middleware.Guard
         (pgxguard is the reference). Flag any integration that re-implements
         analysis, redaction or N+1 by hand. Each should expose ResetN1() for
-        per-request scoping.
+        per-request scoping. Each `require`s a published core version and is
+        pointed at the working tree by the root go.work — do NOT suggest adding
+        a `replace` directive; no go.mod in this repo has one.
 
     - path: "parsers/**"
       instructions: >-
@@ -116,16 +118,37 @@ reviews:
 
     - path: "explain/**"
       instructions: >-
-        EXPLAIN must never execute the statement: keep the read-only
-        BeginTx + always-Rollback, never use ANALYZE, and keep validate()'s
-        comment/string-aware multi-statement rejection and SELECT/WITH-only (DML
-        behind WithAllowDML) policy. EXPLAIN takes no bind params, so
-        concatenation is by design — the defense is validate() + the rolled-back
-        read-only tx; do not "fix" it with parameterization. Deliberate
-        carve-out: explain keeps Result.Query (and the inner analyzer.Result
-        .Query of its findings) RAW — the user typed the query on their own CLI,
-        it never reaches a log/telemetry sink, and Fingerprint is still set. Do
-        NOT flag explain findings for not redacting Query; that is intended.
+        EXPLAIN must never execute the statement: keep the BeginTx +
+        always-Rollback, never use ANALYZE, and keep validate()'s comment/string-
+        aware multi-statement rejection and SELECT/WITH-only (DML behind
+        WithAllowDML) policy. The tx is read-only EXCEPT on MySQL/MariaDB for DML
+        (BeginTx ReadOnly: !dml): those servers reject every statement in a READ
+        ONLY tx with error 1792, including a planning-only EXPLAIN — do NOT
+        "restore" ReadOnly:true there, it breaks WithAllowDML outright. EXPLAIN
+        takes no bind params, so concatenation is by design — the defense is
+        validate() + the rolled-back tx; do not "fix" it with parameterization.
+        The MySQL plan is requested as `EXPLAIN FORMAT=TRADITIONAL` because
+        MySQL 9 defaults @@explain_format to TREE (one free-text column); do not
+        drop the clause. Plan columns are addressed BY NAME, never by position:
+        MariaDB emits 10 columns where MySQL emits 12. Rows whose `table` starts
+        with `<` are UNION RESULT / derived temporary tables and are skipped on
+        purpose. Deliberate carve-out: explain keeps Result.Query (and the inner
+        analyzer.Result.Query of its findings) RAW — the user typed the query on
+        their own CLI, it never reaches a log/telemetry sink, and Fingerprint is
+        still set. Do NOT flag explain findings for not redacting Query; that is
+        intended.
+
+    - path: "test/integration/**"
+      instructions: >-
+        Integration tests for explain/ against live PostgreSQL, MySQL and
+        MariaDB, in their own unpublished module so the DB drivers stay out of
+        the core import graph. Everything is behind the `integration` build tag,
+        so `go test ./...` stays Docker-free — do not suggest removing the tag or
+        folding this into the core module. The tabular EXPLAIN output these pin
+        is version-dependent, which is precisely why they cannot be unit tests;
+        do not suggest replacing them with fixtures or mocks. Tests skip when
+        their DSN env var is unset. MySQL and MariaDB cases must run against both
+        servers (they share the "mysql" dialect but differ in EXPLAIN output).
 
     - path: "**/*_test.go"
       instructions: >-
@@ -141,7 +164,7 @@ reviews:
     gitleaks:
       enabled: true # secret scanning — important for a security-adjacent tool
     yamllint:
-      enabled: true
+      enabled: true # also lints test/integration/docker-compose.yml
     actionlint:
       enabled: true # lints .github/workflows/ci.yml
     markdownlint:

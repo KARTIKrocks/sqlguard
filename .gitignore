@@ -24,9 +24,9 @@ sqlguard-website
 # Dependency directories (remove the comment below to include it)
 # vendor/
 
-# Go workspace file
-go.work
-go.work.sum
+# go.work and go.work.sum are deliberately committed: every module in this repo
+# lives here, and the workspace is what makes the satellites compile against
+# this tree instead of the published core. Consumers never see it.
 
 # env file
 .env
