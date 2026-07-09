@@ -3,7 +3,7 @@ module github.com/KARTIKrocks/sqlguard/integrations/sqlxguard
 go 1.26
 
 require (
-	github.com/KARTIKrocks/sqlguard v0.1.0
+	github.com/KARTIKrocks/sqlguard v0.1.1
 	github.com/jmoiron/sqlx v1.4.0
 )
 
