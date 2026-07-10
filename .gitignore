@@ -24,9 +24,15 @@ sqlguard-website
 # Dependency directories (remove the comment below to include it)
 # vendor/
 
-# go.work and go.work.sum are deliberately committed: every module in this repo
-# lives here, and the workspace is what makes the satellites compile against
-# this tree instead of the published core. Consumers never see it.
+# go.work is deliberately committed: every module in this repo lives here, and
+# the workspace is what makes the satellites compile against this tree instead
+# of the published core. Consumers never see it.
+#
+# go.work.sum is not. Go writes it only for sums the per-module go.sum files
+# cannot supply, which happens when workspace-wide MVS lifts a dependency above
+# what some module requires on its own. Committing it papers over that skew;
+# leaving it out means the build says so.
+go.work.sum
 
 # env file
 .env
