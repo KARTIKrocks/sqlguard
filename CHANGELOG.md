@@ -9,32 +9,6 @@ the same version in lockstep.
 
 ## [Unreleased]
 
-## [0.2.0] - 2026-09-14
-
-Raises the minimum Go version. No public API changed.
-
-### Changed
-
-- **Minimum Go version is now 1.27** (was 1.26) across all nine modules and
-  `go.work`. `golangci-lint` is repinned to v2.13.2 — v2.12.2's bundled
-  `staticcheck` panics building IR for stdlib/vendor packages under a Go 1.27
-  toolchain.
-- CI now runs `govulncheck` per module (`make vuln`, wired into `make ci`) and
-  resolves both `golangci-lint` and `govulncheck` versions from the Makefile
-  instead of a second hardcoded copy in the workflow, so they can't drift
-  apart. Added `make tidy-check` for CI hygiene.
-- `.golangci.yml` gained `errname`, `nilnesserr`, `contextcheck`,
-  `fatcontext`, `noctx`, `durationcheck`, `perfsprint`, `makezero`,
-  `wastedassign`, `asasalint`, `reassign`, `copyloopvar`, `intrange`, and
-  `nolintlint`, plus `errcheck.check-type-assertions`.
-
-### Fixed
-
-- **CLI `explain`**: the initial connectivity check (`db.Ping`) ignored the
-  command's 30s timeout and could hang indefinitely against an unreachable
-  database. It now shares the same context-scoped timeout as the rest of the
-  command.
-
 ## [0.1.1] - 2026-07-09
 
 Fixes `explain` against current MySQL and MariaDB servers, where it previously
@@ -131,7 +105,6 @@ Initial public release.
   `integrations/sqlxguard`, `integrations/pgxguard` (native pgx / pgxpool),
   `integrations/bunguard`, `integrations/xormguard`, `integrations/entguard`.
 
-[Unreleased]: https://github.com/KARTIKrocks/sqlguard/compare/v0.2.0...HEAD
-[0.2.0]: https://github.com/KARTIKrocks/sqlguard/compare/v0.1.1...v0.2.0
+[Unreleased]: https://github.com/KARTIKrocks/sqlguard/compare/v0.1.1...HEAD
 [0.1.1]: https://github.com/KARTIKrocks/sqlguard/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/KARTIKrocks/sqlguard/releases/tag/v0.1.0
