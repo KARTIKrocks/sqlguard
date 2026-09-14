@@ -4,7 +4,7 @@ go 1.26
 
 require (
 	github.com/KARTIKrocks/sqlguard v0.1.1
-	github.com/jackc/pgx/v5 v5.10.0
+	github.com/jackc/pgx/v5 v5.11.0
 )
 
 require (
