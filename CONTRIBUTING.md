@@ -5,7 +5,7 @@ project-specific things that aren't obvious from a quick look at the repo.
 
 ## Project layout
 
-sqlguard is a **multi-module repo** — nine Go modules on Go 1.26, kept in
+sqlguard is a **multi-module repo** — nine Go modules on Go 1.27, kept in
 lockstep:
 
 - **root** (`github.com/KARTIKrocks/sqlguard`) — core analyzer, middleware,
@@ -32,9 +32,9 @@ depends on these modules. To reproduce a consumer's build, set `GOWORK=off`.
 ## Development workflow
 
 ```bash
-make setup      # install pinned golangci-lint + goimports (one-time)
+make setup      # install pinned golangci-lint + goimports + govulncheck (one-time)
 make all        # tidy, fmt, vet, lint, build, test across all nine modules
-make ci         # what CI runs: fmt-check, vet, lint, test-race
+make ci         # what CI runs: fmt-check, vet, lint, vuln, test-race
 make test-race  # race detector (required for anything touching middleware)
 make help       # list every target
 ```

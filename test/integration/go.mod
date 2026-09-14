@@ -6,7 +6,7 @@
 // working tree.
 module github.com/KARTIKrocks/sqlguard/test/integration
 
-go 1.26
+go 1.27
 
 require (
 	github.com/KARTIKrocks/sqlguard v0.1.0

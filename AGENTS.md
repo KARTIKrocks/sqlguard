@@ -12,12 +12,13 @@ or `parsers/*`, which are separate Go modules. The `MODULES` variable drives the
 loop so a target can't silently skip a satellite.
 
 - `make all` — `tidy fmt vet lint build test` across all modules.
-- `make ci` — the CI pipeline: `fmt-check vet lint test-race`.
+- `make ci` — the CI pipeline: `fmt-check vet lint vuln test-race`.
 - `make build` — `go build ./...` in every module (compile check). `make cli` builds the `bin/sqlguard` binary; `make install` installs it.
 - `make test` — `go test -count=1 ./...` in every module. `make test-race` adds `-race`; `make coverage` writes a merged `coverage.out`.
 - `make lint` — `golangci-lint run` in every module (config in `.golangci.yml`, v2 schema). `make fmt` / `make fmt-check` run `gofmt -s` + `goimports`.
-- `make tidy` — `go mod tidy` across all nine modules. Run after any dependency change; tidying only the root leaves the others stale.
-- `make setup` — installs pinned `golangci-lint` / `goimports` if missing (a prereq of `lint`/`fmt`).
+- `make tidy` — `go mod tidy` across all nine modules. Run after any dependency change; tidying only the root leaves the others stale. `make tidy-check` fails (without leaving the change behind) if any module's go.mod/go.sum is stale — CI hygiene, not part of `all`/`ci`.
+- `make vuln` — `govulncheck` in every module, filtered to advisories the code actually reaches. Needs network access (fetches the advisory database each run).
+- `make setup` — installs pinned `golangci-lint` / `goimports` / `govulncheck` if missing (a prereq of `lint`/`fmt`/`vuln`). `make print-golangci-lint-version` / `make print-govulncheck-version` print the pinned versions so CI resolves them from here instead of a second hardcoded copy.
 - The committed `go.work` makes every satellite compile against this tree, not the published core it `require`s — so a breaking change to `analyzer/`/`middleware/` fails their tests. No `go.mod` here has a `replace`. Use `GOWORK=off` to see a consumer's build. Releasing is manual (see CONTRIBUTING.md).
 - `make db-up` / `make test-integration` / `make db-down` — run `explain/` against live Postgres, MySQL and MariaDB (`test/integration/`, behind the `integration` build tag).
 
@@ -27,7 +28,7 @@ Run a single test: `go test ./middleware/ -run TestDriver_QueryDetectsSelectStar
 
 ## Module topology
 
-Nine Go modules, all on **Go 1.26**, kept in lockstep:
+Nine Go modules, all on **Go 1.27**, kept in lockstep:
 
 - root (`github.com/KARTIKrocks/sqlguard`) — core analyzer, middleware, reporter, `config`, CLI. Near-zero-dependency: `analyzer`/`middleware`/`reporter` stay dependency-free; the only third-party deps are sqlite3 (CLI `db`/tests), cobra (CLI), and `gopkg.in/yaml.v3` (isolated to the `config` package). Importing `analyzer`/`middleware` does not pull YAML.
 - `parsers/pgparser`, `parsers/mysqlparser` — opt-in real SQL grammars, isolated in their own modules so the heavy parser deps never enter a consumer's build unless explicitly imported.

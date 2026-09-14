@@ -52,7 +52,7 @@ func (c *analysisCache) get(query string) ([]analyzer.Result, bool) {
 	defer c.mu.Unlock()
 	if el, ok := c.items[query]; ok {
 		c.ll.MoveToFront(el)
-		return el.Value.(*cacheEntry).results, true
+		return el.Value.(*cacheEntry).results, true //nolint:errcheck // every element pushed by put is a *cacheEntry
 	}
 	return nil, false
 }
@@ -64,7 +64,7 @@ func (c *analysisCache) put(query string, results []analyzer.Result) {
 	defer c.mu.Unlock()
 	if el, ok := c.items[query]; ok {
 		c.ll.MoveToFront(el)
-		el.Value.(*cacheEntry).results = results
+		el.Value.(*cacheEntry).results = results //nolint:errcheck // every element pushed by put is a *cacheEntry
 		return
 	}
 	el := c.ll.PushFront(&cacheEntry{key: query, results: results})
@@ -72,7 +72,7 @@ func (c *analysisCache) put(query string, results []analyzer.Result) {
 	if c.ll.Len() > c.capacity {
 		if oldest := c.ll.Back(); oldest != nil {
 			c.ll.Remove(oldest)
-			delete(c.items, oldest.Value.(*cacheEntry).key)
+			delete(c.items, oldest.Value.(*cacheEntry).key) //nolint:errcheck // every element pushed by put is a *cacheEntry
 		}
 	}
 }

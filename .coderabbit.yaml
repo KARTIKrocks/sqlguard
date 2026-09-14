@@ -43,7 +43,7 @@ reviews:
   path_instructions:
     - path: "**/*.go"
       instructions: >-
-        Go 1.26; modern idioms expected (range-over-int, `any`, compile-time
+        Go 1.27; modern idioms expected (range-over-int, `any`, compile-time
         interface asserts `var _ I = (*T)(nil)`). Keep the core dependency-light:
         analyzer, middleware and reporter must stay free of third-party deps and
         of YAML. Flag new external imports in those packages. Watch for

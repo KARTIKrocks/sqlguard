@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        go-version: ["1.26"]
+        go-version: ["1.27"]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -109,7 +109,7 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          go-version: "1.26"
+          go-version: "1.27"
 
       - name: Run integration tests
         run: make test-integration
@@ -139,13 +139,70 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          go-version: "1.26"
+          go-version: "1.27"
+
+      # Version comes from the Makefile so a local `make lint` and this gate
+      # run the same linter. Nothing bumps it automatically — Dependabot does
+      # not track action `with:` inputs — so refresh GOLANGCI_LINT_VERSION
+      # deliberately.
+      - name: Resolve golangci-lint version
+        id: golangci-lint-version
+        run: echo "version=$(make -s print-golangci-lint-version)" >> "$GITHUB_OUTPUT"
 
       - uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.12.2
+          version: ${{ steps.golangci-lint-version.outputs.version }}
           working-directory: ${{ matrix.module }}
           args: --timeout=5m
+
+  # Not redundant with Dependabot or CodeQL, which cover different things:
+  # Dependabot reports that a dependency is behind, CodeQL looks for bug
+  # patterns in our own code. govulncheck cross-references the Go
+  # vulnerability database against the call graph, so it reports only
+  # advisories this code actually reaches.
+  #
+  # Scanned per module for the same reason `lint` is: the root module's
+  # ./... stops at nested go.mod boundaries, so the satellites' own
+  # dependency trees are invisible to a scan run from the root.
+  vuln:
+    name: govulncheck (${{ matrix.module }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module:
+          - .
+          - integrations/gormguard
+          - integrations/sqlxguard
+          - integrations/pgxguard
+          - integrations/bunguard
+          - integrations/xormguard
+          - integrations/entguard
+          - parsers/pgparser
+          - parsers/mysqlparser
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.27"
+
+      # Version comes from the Makefile so a local `make vuln` and this gate
+      # run the same scanner. Nothing bumps it automatically — Dependabot
+      # does not track `go install` lines — so refresh GOVULNCHECK_VERSION
+      # deliberately. The advisory database is still fetched at run time, so
+      # an older scanner still reports current advisories.
+      - name: Install govulncheck
+        run: |
+          version="$(make -s print-govulncheck-version)"
+          echo "govulncheck $version"
+          go install "golang.org/x/vuln/cmd/govulncheck@$version"
+
+      - name: Scan
+        working-directory: ${{ matrix.module }}
+        run: govulncheck ./...
 
   build:
     runs-on: ubuntu-latest
@@ -156,7 +213,7 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          go-version: "1.26"
+          go-version: "1.27"
 
       - name: Build CLI
         run: go build -o bin/sqlguard ./cmd/sqlguard
@@ -170,7 +227,7 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          go-version: "1.26"
+          go-version: "1.27"
 
       # `make coverage` runs every module and merges into a single coverage.out
       # (root go test does not reach the satellite modules).

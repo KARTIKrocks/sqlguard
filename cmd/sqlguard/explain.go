@@ -41,7 +41,10 @@ func runExplain(cmd *cobra.Command, args []string) error {
 
 	query := args[0]
 
-	db, err := openDB(explainDialect, explainDSN)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	db, err := openDB(ctx, explainDialect, explainDSN)
 	if err != nil {
 		return fmt.Errorf("failed to connect: %w", err)
 	}
@@ -55,9 +58,6 @@ func runExplain(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
 
 	result, err := analyzer.Analyze(ctx, query)
 	if err != nil {

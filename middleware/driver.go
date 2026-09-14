@@ -231,7 +231,7 @@ func (c *wConn) QueryContext(ctx context.Context, query string, args []driver.Na
 			return nil, verr
 		}
 		done := c.g.Observe(query)
-		rows, err := q.Query(query, values) //nolint:staticcheck // legacy fallback
+		rows, err := q.Query(query, values)
 		done(err)
 		return rows, err
 	}
@@ -254,7 +254,7 @@ func (c *wConn) ExecContext(ctx context.Context, query string, args []driver.Nam
 			return nil, verr
 		}
 		done := c.g.Observe(query)
-		res, err := e.Exec(query, values) //nolint:staticcheck // legacy fallback
+		res, err := e.Exec(query, values)
 		done(err)
 		return res, err
 	}

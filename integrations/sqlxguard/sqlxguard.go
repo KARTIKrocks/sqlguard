@@ -97,7 +97,7 @@ func (w *WrappedDB) GetContext(ctx context.Context, dest any, query string, args
 // Query executes a query that returns rows.
 func (w *WrappedDB) Query(query string, args ...any) (*sql.Rows, error) {
 	done := w.g.Observe(query)
-	rows, err := w.db.Query(query, args...)
+	rows, err := w.db.Query(query, args...) //nolint:noctx // deliberate passthrough of sqlx.DB's own non-context method
 	done(err)
 	return rows, err
 }
@@ -121,7 +121,7 @@ func (w *WrappedDB) Queryx(query string, args ...any) (*sqlx.Rows, error) {
 // Exec executes a query without returning rows.
 func (w *WrappedDB) Exec(query string, args ...any) (sql.Result, error) {
 	done := w.g.Observe(query)
-	result, err := w.db.Exec(query, args...)
+	result, err := w.db.Exec(query, args...) //nolint:noctx // deliberate passthrough of sqlx.DB's own non-context method
 	done(err)
 	return result, err
 }
@@ -151,7 +151,7 @@ func (w *WrappedDB) NamedExecContext(ctx context.Context, query string, arg any)
 }
 
 // Ping verifies the database connection.
-func (w *WrappedDB) Ping() error { return w.db.Ping() }
+func (w *WrappedDB) Ping() error { return w.db.Ping() } //nolint:noctx // deliberate passthrough of sqlx.DB's own non-context method
 
 // Close closes the database connection.
 func (w *WrappedDB) Close() error { return w.db.Close() }

@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -38,7 +39,7 @@ func WithAllowDML() Option {
 // dialect must be "postgres" or "mysql".
 func New(db *sql.DB, dialect string, opts ...Option) (*PlanAnalyzer, error) {
 	if db == nil {
-		return nil, fmt.Errorf("explain: db is nil")
+		return nil, errors.New("explain: db is nil")
 	}
 	dialect = strings.ToLower(dialect)
 	if dialect != "postgres" && dialect != "mysql" {
@@ -106,10 +107,10 @@ func (p *PlanAnalyzer) Analyze(ctx context.Context, query string) (*Result, erro
 func (p *PlanAnalyzer) validate(query string) (string, analyzer.StmtKind, error) {
 	q := strings.TrimSpace(query)
 	if q == "" {
-		return "", analyzer.StmtUnknown, fmt.Errorf("explain: refusing to explain an empty query")
+		return "", analyzer.StmtUnknown, errors.New("explain: refusing to explain an empty query")
 	}
 	if analyzer.IsMultiStatement(q) {
-		return "", analyzer.StmtUnknown, fmt.Errorf("explain: refusing to explain multi-statement input")
+		return "", analyzer.StmtUnknown, errors.New("explain: refusing to explain multi-statement input")
 	}
 	q = strings.TrimRight(q, "; \t\r\n")
 
@@ -119,11 +120,11 @@ func (p *PlanAnalyzer) validate(query string) (string, analyzer.StmtKind, error)
 		return q, st.Kind, nil
 	case analyzer.StmtInsert, analyzer.StmtUpdate, analyzer.StmtDelete:
 		if !p.allowDML {
-			return "", st.Kind, fmt.Errorf("explain: refusing to EXPLAIN a data-modifying statement by default; construct the analyzer with explain.WithAllowDML to opt in")
+			return "", st.Kind, errors.New("explain: refusing to EXPLAIN a data-modifying statement by default; construct the analyzer with explain.WithAllowDML to opt in")
 		}
 		return q, st.Kind, nil
 	default:
-		return "", st.Kind, fmt.Errorf("explain: refusing to explain a non-SELECT/WITH/DML statement (DDL, SET, transaction control, or unrecognized)")
+		return "", st.Kind, errors.New("explain: refusing to explain a non-SELECT/WITH/DML statement (DDL, SET, transaction control, or unrecognized)")
 	}
 }
 
@@ -155,9 +156,6 @@ func (p *PlanAnalyzer) analyzePostgres(ctx context.Context, query string) (*Resu
 	// unavoidable; safety comes from validate() plus the rolled-back,
 	// read-only transaction below. We never use EXPLAIN ANALYZE, so the
 	// statement is planned, not executed.
-	//nolint:gosec // G202: EXPLAIN takes no bind params, so concatenation is by
-	// design; the defense is validate() + the rolled-back read-only tx, not
-	// parameterization.
 	explainQuery := "EXPLAIN (FORMAT JSON) " + query
 
 	tx, err := p.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
@@ -234,10 +232,8 @@ func (p *PlanAnalyzer) analyzeMySQL(ctx context.Context, query string, dml bool)
 	// @@explain_format to TREE, which yields one free-text column and no
 	// per-table rows to inspect; the clause restores the classic output and is
 	// also accepted by MySQL 5.7/8 and MariaDB.
-	//
 	//nolint:gosec // G202: EXPLAIN takes no bind params, so concatenation is by
-	// design; the defense is validate() + the rolled-back tx, not
-	// parameterization.
+	// design; the defense is validate() + the rolled-back tx, not parameterization.
 	explainQuery := "EXPLAIN FORMAT=TRADITIONAL " + query
 
 	// MySQL and MariaDB reject *any* statement inside a READ ONLY transaction
@@ -337,7 +333,7 @@ func mysqlRowIssues(query string, col func(string) string) []analyzer.Result {
 			RuleName:   "no-index-used",
 			Severity:   analyzer.SeverityWarning,
 			Query:      query,
-			Message:    fmt.Sprintf("No index used on table %s", table),
+			Message:    "No index used on table " + table,
 			Suggestion: "Consider adding an index on the filtered/joined columns.",
 		})
 	}
@@ -348,7 +344,7 @@ func mysqlRowIssues(query string, col func(string) string) []analyzer.Result {
 			RuleName:   "filesort",
 			Severity:   analyzer.SeverityInfo,
 			Query:      query,
-			Message:    fmt.Sprintf("Filesort detected on table %s", table),
+			Message:    "Filesort detected on table " + table,
 			Suggestion: "Consider adding an index that covers the ORDER BY columns.",
 		})
 	}
