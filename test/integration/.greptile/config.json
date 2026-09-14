@@ -1,0 +1,4 @@
+{
+  "disabledRules": ["core-dependency-purity", "hot-path-allocation", "rules-self-register", "parser-never-breaks-query-path"],
+  "instructions": "This is a separate, unpublished Go module (its own go.mod) that runs explain/ against live Postgres, MySQL, and MariaDB behind the `integration` build tag — it deliberately pulls in real DB drivers the core modules must not, and is not on the per-query hot path. Tests skip when their DSN env var is unset; each statement should get its own deadline (a standalone context, not the shared test context, so it stays safe inside t.Cleanup). Don't suggest replacing the pinned, version-dependent tabular EXPLAIN assertions with fixtures or mocks — the version drift across MySQL/MariaDB/Postgres is exactly what these tests exist to catch."
+}

@@ -1,0 +1,64 @@
+{
+  "strictness": 2,
+  "commentTypes": ["logic", "syntax", "style"],
+  "triggerOnUpdates": true,
+  "statusCheck": true,
+  "ignorePatterns": "bin/**\ndist/**\n**/testdata/**\n**/go.sum\n**/vendor/**\n**/node_modules/**",
+  "instructions": "sqlguard (github.com/KARTIKrocks/sqlguard) is a near-zero-dependency, security-conscious SQL query analyzer for Go: a database/sql driver-layer middleware plus a static CLI scanner plus an EXPLAIN-plan analyzer, sharing one analyzer/reporter core. It is pre-1.0, nine Go modules kept in lockstep (root + parsers/pgparser + parsers/mysqlparser + six integrations/*), and it is a defensive security tool: a bug that lets it silently miss a dangerous query, leak a raw literal, or actually execute a statement during EXPLAIN is a security bug, not a style nit — see SECURITY.md's threat model. Prioritize fail-closed behavior, PII redaction, and not altering query semantics over style. See AGENTS.md for architecture and .greptile/rules.md for pattern rationale and worked examples from real bugs found in this codebase.",
+  "rules": [
+    {
+      "id": "fail-closed-on-unknown-shape",
+      "rule": "Code that interprets an external, version-dependent shape (an EXPLAIN plan's columns, a SQL parser's output, a config file) must fail closed — return an error — when that shape isn't what's expected, never silently degrade to 'found nothing.' A false negative in a query linter is worse than a hard failure. This was a real bug: a MySQL 9 EXPLAIN plan missing an expected column made every column lookup return \"\" and Analyze reported zero issues instead of erroring.",
+      "scope": ["explain/**/*.go", "analyzer/**/*.go"],
+      "severity": "high"
+    },
+    {
+      "id": "redaction-default",
+      "rule": "A Result.Query must be redacted (via analyzer.Redact) and Result.Fingerprint must always be PII-free/low-cardinality before a Result leaves the process, unless rawQuery/WithRawQuery is explicitly set by the caller. Do not introduce a second normalizer — everything routes through the one Redact/Fingerprint pair in analyzer/redact.go. explain/ is the sole deliberate exception (Result.Query stays raw there — the user typed it on their own CLI) — do not flag that as a redaction miss, and do not extend the exception elsewhere.",
+      "scope": ["analyzer/**/*.go", "middleware/**/*.go"],
+      "severity": "high"
+    },
+    {
+      "id": "single-analysis-core",
+      "rule": "middleware.Guard (Check / CheckLatency / Observe / ResetN1 / Analyzer) is the single analysis core. Every interception point in the driver chain and every out-of-tree integration must route through one Guard. Flag any hand-rolled check/latency logic that bypasses it — it silently loses redaction, fingerprints, the parser seam, config, N+1, and dedup.",
+      "scope": ["middleware/**/*.go", "integrations/**/*.go"],
+      "severity": "high"
+    },
+    {
+      "id": "explain-never-executes",
+      "rule": "The EXPLAIN analyzer must never execute the statement it plans: keep BeginTx + an unconditional deferred Rollback, never use EXPLAIN ANALYZE, and keep validate()'s comment/string-aware multi-statement rejection and SELECT/WITH-only-by-default (DML only behind WithAllowDML) policy. MySQL/MariaDB DML uses BeginTx(ReadOnly: !dml) — NOT always ReadOnly:true — because those servers reject every statement in a read-only tx (error 1792), including a planning-only EXPLAIN; do not 'restore' ReadOnly:true there. EXPLAIN takes no bind params so string concatenation there is by design — the defense is validate() plus the rolled-back tx, not parameterization; do not suggest parameterizing it. Plan columns must be read BY NAME (MariaDB emits 10 columns, MySQL 12), never by position.",
+      "scope": ["explain/**/*.go"],
+      "severity": "high"
+    },
+    {
+      "id": "core-dependency-purity",
+      "rule": "analyzer, middleware, and reporter must stay free of third-party dependencies and of any YAML library — config is the only YAML-aware package, and nothing should import config from those three. Flag any new external import added to analyzer/**, middleware/**, or reporter/**.",
+      "scope": ["analyzer/**/*.go", "middleware/**/*.go", "reporter/**/*.go", "go.mod"],
+      "severity": "high"
+    },
+    {
+      "id": "driver-optional-interfaces",
+      "rule": "middleware/driver.go structurally implements optional database/sql driver interfaces (QueryerContext, Pinger, SessionResetter, NamedValueChecker, etc.) on every wrapper type, forwarding to the base only if the base implements that interface, else returning driver.ErrSkip or a documented no-op so database/sql falls back exactly as it would for the bare driver. Do not 'simplify' this away. The deprecated-path delegations (base.Begin, legacy Queryer/Execer, Stmt.Exec/Query) are deliberate and //nolint:staticcheck-annotated — a faithful wrapper must delegate to whatever the wrapped driver exposes; do not suggest removing them.",
+      "scope": ["middleware/driver.go"],
+      "severity": "medium"
+    },
+    {
+      "id": "rules-self-register",
+      "rule": "A new analyzer rule must be added as an analyzer.Register(RuleSpec{...}) call from init() in analyzer/rules.go — do not hand-maintain a rule list in Default(). Rules read the normalized analyzer.Statement produced by the configured Parser; they must never re-parse or pattern-match raw SQL themselves.",
+      "scope": ["analyzer/**/*.go"],
+      "severity": "medium"
+    },
+    {
+      "id": "parser-never-breaks-query-path",
+      "rule": "A pluggable SQL parser (parsers/pgparser, parsers/mysqlparser) or analyzer.Parser implementation must never let a parse failure propagate as an error that breaks the caller's query path. On a parse failure, degrade to the FallbackParser's best-effort Statement (Exact=false) instead. The dialect parsers deliberately keep MaxInListLen/ImplicitCommaJoin/CartesianJoin as fallback heuristics rather than deriving them from the AST — that is a documented carve-out, not a bug to fix.",
+      "scope": ["parsers/**/*.go", "analyzer/**/*.go"],
+      "severity": "high"
+    },
+    {
+      "id": "hot-path-allocation",
+      "rule": "analyzer.Analyze and middleware.Guard.Check run on every intercepted query. Flag a new heap allocation, map creation, or unbounded work added to that path — config resolution and rule enable/disable must happen once at construction (Profile / DefaultWithProfile), never per query. If an allocation is genuinely unavoidable there, say so explicitly rather than flagging it as an oversight.",
+      "scope": ["analyzer/**/*.go", "middleware/**/*.go"],
+      "severity": "medium"
+    }
+  ]
+}

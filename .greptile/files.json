@@ -1,0 +1,20 @@
+{
+  "files": [
+    {
+      "path": "AGENTS.md",
+      "description": "Repository conventions: nine-module topology, driver-interception architecture, the analyzer/Guard/config layering, redaction, suppression, and EXPLAIN safety invariants."
+    },
+    {
+      "path": "SECURITY.md",
+      "description": "The threat model: redaction-by-default, EXPLAIN-never-executes, and query-semantics-preserving middleware are security invariants, not style preferences — bugs breaking them are in scope as vulnerabilities."
+    },
+    {
+      "path": "sqlguard.go",
+      "description": "Root package entry points (Register, OpenDB) that wrap middleware.Guard for the database/sql driver layer."
+    },
+    {
+      "path": ".golangci.yml",
+      "description": "The linter ruleset already enforced in CI, including gosec/errorlint/bodyclose/nilerr — avoid duplicating what golangci-lint already flags."
+    }
+  ]
+}
