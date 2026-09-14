@@ -5,7 +5,7 @@ go 1.27
 require (
 	entgo.io/ent v0.14.6
 	github.com/KARTIKrocks/sqlguard v0.1.1
-	github.com/mattn/go-sqlite3 v1.14.50
+	github.com/mattn/go-sqlite3 v1.14.52
 )
 
 require (
