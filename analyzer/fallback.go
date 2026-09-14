@@ -250,7 +250,7 @@ func hasUnsafeAddNotNull(sanitized string) bool {
 func splitTopLevelCommas(s string) []string {
 	var segs []string
 	depth, start := 0, 0
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		switch s[i] {
 		case '(':
 			depth++

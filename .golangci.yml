@@ -1,5 +1,11 @@
 version: "2"
 
+# Report every occurrence. The defaults (max-same-issues: 3) hide duplicates,
+# which makes a lint failure look smaller than it is.
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
 linters:
   enable:
     - errcheck
@@ -15,10 +21,31 @@ linters:
     # Security & correctness (sqlguard is a security-adjacent tool).
     - gosec # SAST — SQL injection, unhandled crypto/file ops, etc.
     - errorlint # correct error wrapping / errors.Is / errors.As usage
+    - errname # sentinel errors must be named Err*, error types *Error
     - bodyclose # response/rows bodies must be closed
     - nilerr # returning nil after a non-nil error check
+    - nilnesserr # returning a nil error while a wrapped error is still live
+    # Concurrency and context correctness — the driver chain and QueryTracker
+    # are concurrent, and every analysis entry point takes a context.Context.
+    - contextcheck
+    - fatcontext
+    - noctx
+    - durationcheck
     - unconvert # remove redundant type conversions
     - usestdlibvars # prefer stdlib constants (http.MethodGet, sql.LevelReadOnly…)
+    # Guard.Check/Observe run on every query through the driver chain and are
+    # documented as allocation-light — keep the hot path honest.
+    - perfsprint
+    - makezero
+    - wastedassign
+    - asasalint
+    - reassign
+    # Modern Go idioms expected repo-wide (see AGENTS.md): range-over-int,
+    # no unnecessary loop-var copies now that Go 1.22+ scopes them per-iteration.
+    - copyloopvar
+    - intrange
+    # Keep //nolint directives specific and explained.
+    - nolintlint
   settings:
     gocyclo:
       min-complexity: 15
@@ -31,14 +58,31 @@ linters:
       # and file/crypto checks (G201/G202/G3xx/G4xx) stay on.
       excludes:
         - G115
+    errcheck:
+      # An unchecked type assertion panics; deliberate `_ =` discards still pass.
+      check-type-assertions: true
+    nolintlint:
+      require-explanation: true
+      require-specific: true
   exclusions:
     rules:
       - linters:
           - errcheck
           - gosec # test fixtures use lax file perms / ignore setup errors
         path: _test\.go
+      # Tests may assert on unwrapped errors, build requests/queries without a
+      # context, and use fmt.Sprintf freely; none of that ships to consumers.
+      - linters:
+          - bodyclose
+          - errorlint
+          - noctx
+          - perfsprint
+        path: _test\.go
 
 formatters:
   enable:
     - gofmt
     - goimports
+  settings:
+    gofmt:
+      simplify: true

@@ -1,6 +1,6 @@
 module github.com/KARTIKrocks/sqlguard/integrations/pgxguard
 
-go 1.26
+go 1.27
 
 require (
 	github.com/KARTIKrocks/sqlguard v0.1.1

@@ -1,12 +1,13 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 )
 
 // openDB opens a database connection using the appropriate driver.
-func openDB(dialect, dsn string) (*sql.DB, error) {
+func openDB(ctx context.Context, dialect, dsn string) (*sql.DB, error) {
 	var driverName string
 	switch dialect {
 	case "postgres":
@@ -22,7 +23,7 @@ func openDB(dialect, dsn string) (*sql.DB, error) {
 		return nil, err
 	}
 
-	if err := db.Ping(); err != nil {
+	if err := db.PingContext(ctx); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("cannot reach database: %w", err)
 	}
