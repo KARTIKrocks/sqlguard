@@ -1,11 +1,11 @@
 module github.com/KARTIKrocks/sqlguard/integrations/entguard
 
-go 1.26
+go 1.26.0
 
 require (
 	entgo.io/ent v0.14.6
 	github.com/KARTIKrocks/sqlguard v0.1.1
-	github.com/mattn/go-sqlite3 v1.14.50
+	github.com/mattn/go-sqlite3 v1.14.52
 )
 
 require (

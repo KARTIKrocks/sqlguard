@@ -1,6 +1,6 @@
 module github.com/KARTIKrocks/sqlguard/parsers/mysqlparser
 
-go 1.26
+go 1.26.0
 
 require github.com/KARTIKrocks/sqlguard v0.1.1
 

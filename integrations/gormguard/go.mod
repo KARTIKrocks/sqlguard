@@ -1,6 +1,6 @@
 module github.com/KARTIKrocks/sqlguard/integrations/gormguard
 
-go 1.26
+go 1.26.0
 
 require (
 	github.com/KARTIKrocks/sqlguard v0.1.1
@@ -11,6 +11,6 @@ require (
 require (
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
-	github.com/mattn/go-sqlite3 v1.14.50 // indirect
-	golang.org/x/text v0.41.0 // indirect
+	github.com/mattn/go-sqlite3 v1.14.52 // indirect
+	golang.org/x/text v0.42.0 // indirect
 )
