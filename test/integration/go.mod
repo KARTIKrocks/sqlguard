@@ -1,9 +1,11 @@
 // Integration tests for the explain/ package against live databases.
 //
-// This module is never published or tagged: it exists so the Postgres and
-// MySQL drivers stay out of the core module's import graph. Like every module
-// here it carries no `replace` directive — the root go.work points it at the
-// working tree.
+// This module is never published or tagged: it exists so the live-database
+// tests (and the drivers they register) stay out of the core module's test
+// graph. The root module also requires the same drivers, but only
+// cmd/sqlguard imports them, so a library consumer never links them. Like
+// every module here it carries no `replace` directive — the root go.work
+// points it at the working tree.
 module github.com/KARTIKrocks/sqlguard/test/integration
 
 go 1.27
