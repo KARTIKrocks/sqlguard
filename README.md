@@ -1,526 +1,257 @@
-# sqlguard
+<!-- The centred logo block opens the file, so there is no h1 on line 1. -->
+<!-- markdownlint-disable-next-line MD041 -->
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="website/static/img/logo-dark.svg">
+    <img src="website/static/img/logo.svg" alt="sqlguard" width="104" height="104">
+  </picture>
+</p>
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/KARTIKrocks/sqlguard.svg)](https://pkg.go.dev/github.com/KARTIKrocks/sqlguard)
-[![Go Report Card](https://goreportcard.com/badge/github.com/KARTIKrocks/sqlguard)](https://goreportcard.com/report/github.com/KARTIKrocks/sqlguard)
-[![Go Version](https://img.shields.io/github/go-mod/go-version/KARTIKrocks/sqlguard)](go.mod)
-[![CI](https://github.com/KARTIKrocks/sqlguard/actions/workflows/ci.yml/badge.svg)](https://github.com/KARTIKrocks/sqlguard/actions/workflows/ci.yml)
-[![CodeQL](https://github.com/KARTIKrocks/sqlguard/actions/workflows/codeql.yml/badge.svg)](https://github.com/KARTIKrocks/sqlguard/actions/workflows/codeql.yml)
-[![GitHub tag](https://img.shields.io/github/v/tag/KARTIKrocks/sqlguard)](https://github.com/KARTIKrocks/sqlguard/releases)
-[![License](https://img.shields.io/github/license/KARTIKrocks/sqlguard)](LICENSE)
-[![codecov](https://codecov.io/gh/KARTIKrocks/sqlguard/branch/main/graph/badge.svg)](https://codecov.io/gh/KARTIKrocks/sqlguard)
+<h1 align="center">sqlguard</h1>
 
-Production-safe SQL query analyzer for Go applications.
+<p align="center">
+  Production-safe SQL query analyzer for Go. Catches <code>SELECT *</code>,
+  missing <code>WHERE</code> clauses, N+1 loops and slow queries — at runtime
+  through a <code>database/sql</code> driver wrapper, statically in CI, or
+  from the query plan.
+</p>
 
-Detects slow queries, dangerous SQL patterns, and performance issues — both at runtime and statically. Think of it as `golangci-lint` for SQL queries.
+<p align="center">
+  <a href="https://pkg.go.dev/github.com/KARTIKrocks/sqlguard"><img src="https://pkg.go.dev/badge/github.com/KARTIKrocks/sqlguard.svg" alt="Go Reference"></a>
+  <a href="https://github.com/KARTIKrocks/sqlguard/releases"><img src="https://img.shields.io/github/v/tag/KARTIKrocks/sqlguard?filter=v*&amp;label=release" alt="Latest release"></a>
+  <a href="go.mod"><img src="https://img.shields.io/github/go-mod/go-version/KARTIKrocks/sqlguard" alt="Go version"></a>
+  <a href="https://github.com/KARTIKrocks/sqlguard/actions/workflows/ci.yml"><img src="https://github.com/KARTIKrocks/sqlguard/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/KARTIKrocks/sqlguard/actions/workflows/codeql.yml"><img src="https://github.com/KARTIKrocks/sqlguard/actions/workflows/codeql.yml/badge.svg" alt="CodeQL"></a>
+  <a href="https://codecov.io/gh/KARTIKrocks/sqlguard"><img src="https://codecov.io/gh/KARTIKrocks/sqlguard/branch/main/graph/badge.svg" alt="Coverage"></a>
+  <a href="https://goreportcard.com/report/github.com/KARTIKrocks/sqlguard"><img src="https://goreportcard.com/badge/github.com/KARTIKrocks/sqlguard" alt="Go Report Card"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/KARTIKrocks/sqlguard" alt="License: MIT"></a>
+</p>
 
-## Install
+<p align="center">
+  <b><a href="https://kartikrocks.github.io/sqlguard/">Documentation</a></b> ·
+  <b><a href="https://pkg.go.dev/github.com/KARTIKrocks/sqlguard">API Reference</a></b> ·
+  <b><a href="CHANGELOG.md">Changelog</a></b>
+</p>
+
+<p align="center">
+  <img src="website/static/img/sqlguard-terminal.svg" alt="A terminal running sqlguard scan and reporting a critical delete-without-where, a select-star and a leading-wildcard finding, each with a redacted query, an issue line and a fix line" width="860">
+</p>
+
+<p align="center">
+  <code>sqlguard scan ./...</code> — the same rules the runtime middleware applies to every query your app sends.
+</p>
+
+## Why sqlguard?
+
+Query logging tells you what ran. It does not tell you that the query was a
+full-table `DELETE`, that the same lookup just ran 400 times in a loop, or
+that a `LIKE '%…'` can never use the index. sqlguard sits at the one place
+every query passes through — the `database/sql` driver — and turns those
+into findings with a rule name, a redacted query and a fix:
+
+| Capability | sqlguard | Hand-rolled query logging |
+| - | - | - |
+| Every query analyzed, ORM or raw, no wrapper type to thread through | ✓ | You build it |
+| 21 SQL anti-pattern rules with tunable severities | ✓ | You build it |
+| N+1 and slow-query detection at the driver | ✓ | You build it |
+| Literal redaction + stable, PII-free fingerprints | ✓ | You build it |
+| De-duplication and a per-query analysis cache | ✓ | You build it |
+| Static scan of Go source for CI (`exit 1` on findings) | ✓ | You build it |
+| EXPLAIN plan analysis that never executes the query | ✓ | You build it |
+| GORM / sqlx / pgx / bun / xorm / ent adapters | ✓ | You build it |
+
+sqlguard is not a query rewriter and not a tracer. It observes, reports,
+and never touches the SQL or the arguments on their way to the database.
+
+## Features
+
+- **Driver-layer interception** — `sqlguard.Register` wraps any
+  `database/sql` driver and hands back a real `*sql.DB`. Everything on top
+  (sqlc, ent, sqlx, GORM, pgx-stdlib) is covered with no method list to
+  keep in sync.
+- **21 detection rules** — `select-star`, `delete-without-where`,
+  `leading-wildcard`, `non-sargable-predicate`, `cartesian-join`,
+  `large-offset`, `in-list-too-large` and more; `slow-query` and
+  `n-plus-one` at runtime; `seq-scan`, `no-index-used`, `filesort` from
+  EXPLAIN.
+- **Redaction by default** — string and numeric literals become `?` before
+  a finding leaves the process. Every finding carries a `Fingerprint` that
+  is safe as a metrics label.
+- **Quiet in production** — each finding is reported once per window, and
+  a repeated query hits an exact-string LRU instead of being re-parsed:
+  ~20 ns and zero allocations on a hit.
+- **Static scanner** — `sqlguard scan ./...` resolves literals, constants
+  across packages and `fmt.Sprintf` formats via `go/types`.
+- **EXPLAIN analyzer** — plans a query on live PostgreSQL, MySQL or MariaDB
+  inside a read-only, always-rolled-back transaction. Never `ANALYZE`.
+- **One YAML config** — `.sqlguard.yml` drives the middleware, the scanner
+  and the CLI. Inline `-- sqlguard:ignore` / `// sqlguard:ignore` need no
+  config at all.
+- **Pluggable parser** — a zero-dependency fallback by default; opt into a
+  real PostgreSQL or MySQL grammar from a separate module.
+- **Near-zero dependencies** — `analyzer`, `middleware` and `reporter`
+  import nothing outside the standard library.
+
+## Installation
+
+Requires Go 1.27+.
 
 ```bash
-go get github.com/KARTIKrocks/sqlguard
+go get github.com/KARTIKrocks/sqlguard                      # library
+go install github.com/KARTIKrocks/sqlguard/cmd/sqlguard@latest  # CLI
 ```
 
-CLI tool:
-
-```bash
-go install github.com/KARTIKrocks/sqlguard/cmd/sqlguard@latest
-```
-
-## Detection Rules
-
-| Rule                           | Severity | Description                                                                                      |
-| ------------------------------ | -------- | ------------------------------------------------------------------------------------------------ |
-| `select-star`                  | WARNING  | `SELECT *` — selects all columns unnecessarily                                                   |
-| `leading-wildcard`             | WARNING  | `LIKE '%...'` (and `ILIKE`) — index cannot be used                                               |
-| `non-sargable-predicate`       | WARNING  | `WHERE LOWER(col) = ...` — function on column defeats its index                                  |
-| `add-not-null-without-default` | WARNING  | `ALTER TABLE ... ADD COLUMN ... NOT NULL` without `DEFAULT` — fails / rewrites a populated table |
-| `implicit-join`                | WARNING  | `FROM a, b` — comma join; a forgotten condition becomes a cartesian product                      |
-| `cartesian-join`               | WARNING  | Multiple tables with no join condition or `WHERE` — a cartesian product (incl. `CROSS JOIN`)     |
-| `in-list-too-large`            | WARNING  | `IN (...)` value list with more than `max-length` (default 100) elements                         |
-| `large-offset`                 | WARNING  | `OFFSET` above `threshold` (default 1000) — deep pagination scans/discards skipped rows          |
-| `select-distinct`              | INFO     | `SELECT DISTINCT` — often masks duplicate rows from an unintended join                           |
-| `delete-without-where`         | CRITICAL | `DELETE` without `WHERE` — deletes all rows                                                      |
-| `update-without-where`         | CRITICAL | `UPDATE` without `WHERE` — updates all rows                                                      |
-| `insert-without-columns`       | WARNING  | `INSERT` without an explicit column list (`VALUES` or `... SELECT`) — breaks on schema change    |
-| `select-without-limit`         | WARNING  | `SELECT` without `LIMIT` or `WHERE` — may return excessive rows                                  |
-| `orderby-without-limit`        | INFO     | `ORDER BY` without `LIMIT` — sorts entire result set                                             |
-| `n-plus-one`                   | WARNING  | Same query pattern repeated N times (runtime only)                                               |
-| `slow-query`                   | WARNING  | Query exceeds latency threshold (runtime only)                                                   |
-| `seq-scan`                     | WARNING  | Sequential scan detected via EXPLAIN (postgres)                                                  |
-| `full-table-scan`              | WARNING  | Full table scan detected via EXPLAIN (mysql)                                                     |
-| `high-cost`                    | WARNING  | High cost operation in query plan                                                                |
-| `no-index-used`                | WARNING  | No index used for a table access detected via EXPLAIN (mysql)                                    |
-| `filesort`                     | INFO     | `Using filesort` in the query plan — `ORDER BY` not covered by an index (mysql)                  |
-
-## Configuration
-
-Drop a `.sqlguard.yml` at your project root. sqlguard discovers it by walking
-up from the scanned (or working) directory until it finds the file or the git
-root. The CLI takes `--config <path>` and `--no-config`; the file is optional
-— without it every rule runs at its default. A fully-commented template lives
-at [`.sqlguard.example.yml`](.sqlguard.example.yml).
-
-```yaml
-version: 1
-rules:
-  disable: [orderby-without-limit]
-  severity:
-    select-star: info # info | warning | critical | off
-    select-without-limit: "off" # "off" disables the rule
-  settings:
-    leading-wildcard:
-      min-length: 3 # ignore short LIKE '%x%' patterns
-    in-list-too-large:
-      max-length: 100 # flag IN (...) lists longer than this
-    large-offset:
-      threshold: 1000 # flag literal OFFSET above this
-redact: true # redact literals out of Result.Query (default)
-slow-query:
-  threshold: 200ms # runtime middleware threshold
-dedup:
-  window: 1m # report each repeated finding at most once per window ("0" disables)
-scan:
-  exclude-paths: ["(^|/)legacy/"] # static scanner only, regex
-```
-
-Unknown keys and rule names are warnings, not errors, so a config written for
-a newer sqlguard still loads on an older binary; set `strict: true` to make
-them fatal. `only: [rule, ...]` switches to whitelist mode.
-
-**Inline suppressions** — no config required:
-
-```sql
-SELECT * FROM users          -- sqlguard:ignore
-DELETE FROM users            /* sqlguard:ignore:delete-without-where */
-```
+## Quick Start
 
 ```go
-// sqlguard:ignore
-db.Exec("DELETE FROM users")
-db.Query("SELECT * FROM users") // sqlguard:ignore:select-star
-```
+package main
 
-In-SQL directives work at runtime _and_ in the static scanner; the Go-source
-form is honored by the scanner when it sits on or directly above the call.
-
-Apply the same config to the runtime middleware:
-
-```go
-opts, _ := config.Middleware("", ".")        // discover from cwd
-sqlguard.Register("sqlguard-pg", "pgx", opts...)
-```
-
-## Security & redaction
-
-sqlguard's findings flow into logs, so by **default it never emits raw
-literal values**. Before any `Result` leaves the process its `Query` is
-redacted — single-quoted strings and numeric literals become `?`, while
-keywords, identifiers (including `"quoted"` / `` `backtick` `` names) and
-structure are preserved:
-
-```
-[SQLGUARD WARNING] select-star
-  Query: SELECT * FROM users WHERE email = ?
-```
-
-Every `Result` also carries a `Fingerprint`: the redacted query with
-whitespace collapsed and `IN (?, ?, ?)` folded to `(?)`. It is a stable,
-PII-free, low-cardinality identity — safe as a metrics label or log key, and
-the same value the N+1 detector groups on. The JSON reporter emits it as
-`fingerprint`.
-
-Opt out only where the query text is trusted (local debugging):
-
-```go
-a := analyzer.Default().WithRawQuery()        // standalone analyzer
-sqlguard.Register("pg", "pgx", middleware.WithAnalyzer(a))
-```
-
-or `redact: false` in `.sqlguard.yml`. `Fingerprint` is populated either way.
-
-## Usage
-
-### Runtime Middleware
-
-sqlguard wraps at the `database/sql` **driver** layer, so you get back a real
-`*sql.DB` and every query is analyzed automatically — including queries issued
-by ORMs and query builders (sqlc, ent, sqlx, gorm, pgx-stdlib). There is no
-wrapper type to thread through your code and no method list to keep in sync.
-
-```go
 import (
     "database/sql"
+    "log"
+    "time"
+
+    _ "github.com/jackc/pgx/v5/stdlib" // registers the "pgx" driver
+
     "github.com/KARTIKrocks/sqlguard"
     "github.com/KARTIKrocks/sqlguard/middleware"
-    "time"
 )
 
 func main() {
-    // Register an analyzed driver by wrapping an existing one...
-    sqlguard.Register("sqlguard-pg", "postgres",
+    if err := sqlguard.Register("sqlguard-pg", "pgx",
         middleware.WithSlowQueryThreshold(500*time.Millisecond),
         middleware.WithN1Detection(5, 2*time.Second),
-    )
-    db, _ := sql.Open("sqlguard-pg", "...") // db is a plain *sql.DB
+    ); err != nil {
+        log.Fatal(err)
+    }
 
-    // ...or wrap a driver.Connector directly (e.g. pgx stdlib):
-    //   db := sqlguard.OpenDB(connector, middleware.WithN1Detection(5, time.Second))
+    db, err := sql.Open("sqlguard-pg", "postgres://app@localhost/app") // a plain *sql.DB
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer db.Close()
 
-    // Use as normal — warnings are logged automatically
-    db.Query("SELECT * FROM users")
-    // Output:
+    db.Query("SELECT * FROM users WHERE email = 'a@b.c'")
     // [SQLGUARD WARNING] select-star
-    //   Query: SELECT * FROM users
+    //   Query: SELECT * FROM users WHERE email = ?
     //   Issue: SELECT * detected. Selecting all columns can hurt performance.
     //   Fix:   Select only the columns you need.
 }
 ```
 
-### N+1 Query Detection
-
-The middleware detects when the same query pattern executes repeatedly — a classic N+1 problem:
-
-```go
-sqlguard.Register("sqlguard-pg", "postgres",
-    middleware.WithN1Detection(5, 2*time.Second), // flag after 5 similar queries in 2s
-)
-db, _ := sql.Open("sqlguard-pg", "...")
-```
-
-N+1 patterns are detected within the configured time window. On the raw
-`database/sql` driver path you get back a plain `*sql.DB`, so detection is
-process-wide (windowed) — there is no handle to scope it per request. The
-integration adapters (`gormguard`, `pgxguard`, `sqlxguard`, `bunguard`,
-`xormguard`, `entguard`) hold the guard and expose `ResetN1()` to scope
-detection to a single unit of work; call it at a request boundary.
-
-### Noise control (finding de-duplication)
-
-A recurring query would otherwise re-emit the same static warning on every
-execution. By default the runtime middleware reports each finding (rule + query
-fingerprint) **at most once per minute**, so a hot query doesn't flood your
-logs. Tune or disable it:
-
-```go
-sqlguard.Register("sqlguard-pg", "postgres",
-    middleware.WithFindingDedup(5*time.Minute), // quieter
-)
-sqlguard.Register("sqlguard-pg", "postgres",
-    middleware.WithFindingDedup(0), // disable: report every occurrence
-)
-```
-
-Or set `dedup.window` in `.sqlguard.yml`. Slow-query and N+1 findings have
-their own emission policy and are unaffected.
-
-The middleware also memoizes analysis per distinct query string (an LRU keyed on
-the exact query — correct even for the literal-sensitive rules), so a recurring
-query is parsed and rule-checked once rather than on every execution. A repeated
-query then costs a cache lookup instead of a full parse (≈1000× cheaper, zero
-allocations in the repeat case). Default 1024 entries; tune with
-`middleware.WithAnalysisCacheSize(n)` or disable with `n == 0`.
-
-### CLI Static Scanner
-
-Scan your Go source code for SQL issues without running the application:
+Then, in CI:
 
 ```bash
-# Scan current directory
-sqlguard scan .
-
-# Scan specific package
-sqlguard scan ./internal/repository
-
-# JSON output (for CI pipelines)
-sqlguard scan --format json ./...
+sqlguard scan ./...        # exit 1 on findings
 ```
 
-Exit code is **1** when issues are found, **0** when clean — works with CI/CD pipelines.
-
-### EXPLAIN Plan Analyzer
-
-Connect to a live database and analyze query plans:
+And for one query you are worried about:
 
 ```bash
-# PostgreSQL
-sqlguard explain --db "postgres://user:pass@localhost/mydb?sslmode=disable" \
-    "SELECT * FROM orders WHERE user_id = 42"
-
-# MySQL
-sqlguard explain --dialect mysql --db "user:pass@tcp(localhost:3306)/mydb" \
-    "SELECT * FROM orders WHERE user_id = 42"
-
-# JSON output
-sqlguard explain --db "..." --format json "SELECT * FROM orders"
+sqlguard explain --db "postgres://app@localhost/app?sslmode=disable" \
+    "SELECT id FROM orders WHERE customer_id = 42"
 ```
 
-Detects sequential scans, missing indexes, filesort, and high-cost operations.
+Configure once with a `.sqlguard.yml` at the repo root and feed it to the
+middleware with `config.Middleware("", ".")`, or silence a single query
+inline with `-- sqlguard:ignore:select-star`.
 
-For safety the EXPLAIN runs inside a **transaction that is always rolled back**,
-and `ANALYZE` is never used — the statement is planned, never executed. Input
-is validated with a comment- and string-literal-aware multi-statement check (a
-`;` hidden in a comment or string can't smuggle a second statement). Only
-`SELECT`/`WITH` is allowed by default; pass `--allow-dml` to EXPLAIN an
-`INSERT/UPDATE/DELETE` (still rolled back). DDL/`SET`/transaction-control is
-always refused.
+## Documentation
 
-The transaction is additionally **read-only** everywhere except MySQL/MariaDB
-under `--allow-dml`: those servers reject *every* statement in a read-only
-transaction (error 1792), including an EXPLAIN that only plans it. There the
-guarantee rests on the validation, on plain `EXPLAIN` never executing the
-statement, and on the unconditional rollback.
+Full guides live at **[kartikrocks.github.io/sqlguard](https://kartikrocks.github.io/sqlguard/)**:
 
-MariaDB works through `--dialect mysql`. The MySQL plan is requested as
-`EXPLAIN FORMAT=TRADITIONAL`, since MySQL 9 defaults `@@explain_format` to
-`TREE`.
+| Guide | Covers |
+| --- | --- |
+| [Getting Started](https://kartikrocks.github.io/sqlguard/docs/getting-started) | Install, wrap a driver, first finding |
+| [Runtime Middleware](https://kartikrocks.github.io/sqlguard/docs/middleware) | Entry points, every option, what is intercepted, the `Guard` core |
+| [N+1 Detection](https://kartikrocks.github.io/sqlguard/docs/n-plus-one) | Windows, thresholds, per-request scoping |
+| [Noise Control](https://kartikrocks.github.io/sqlguard/docs/noise-control) | Finding de-duplication and the analysis cache |
+| [Redaction & Fingerprints](https://kartikrocks.github.io/sqlguard/docs/redaction) | Why literals never reach a log, what a fingerprint is safe for |
+| [Detection Rules](https://kartikrocks.github.io/sqlguard/docs/rules) | All 21 rules: trigger, why it matters, fix, tunables |
+| [Suppressions](https://kartikrocks.github.io/sqlguard/docs/suppressions) | `sqlguard:ignore` in SQL and in Go |
+| [Configuration](https://kartikrocks.github.io/sqlguard/docs/configuration) | `.sqlguard.yml` reference and the `config` package |
+| [Static Scanner](https://kartikrocks.github.io/sqlguard/docs/scan) | What it resolves, JSON output, CI wiring |
+| [EXPLAIN Analyzer](https://kartikrocks.github.io/sqlguard/docs/explain) | Plan rules and the never-executes safety model |
+| [Integrations](https://kartikrocks.github.io/sqlguard/docs/integrations) | GORM, sqlx, pgx/pgxpool, bun, xorm, ent |
+| [SQL Parsers](https://kartikrocks.github.io/sqlguard/docs/parsers) | Fallback vs. real grammars, what each derives |
+| [Analyzer API](https://kartikrocks.github.io/sqlguard/docs/analyzer) | Custom rules, rule subsets, reporters |
 
-### GORM Integration
+Exact type signatures are generated from source on
+[pkg.go.dev](https://pkg.go.dev/github.com/KARTIKrocks/sqlguard).
 
-```bash
-go get github.com/KARTIKrocks/sqlguard/integrations/gormguard
+## Integrations
+
+The driver wrapper already covers every library built on `database/sql`.
+The adapters exist for APIs that bypass it (native pgx) and for a handle to
+call `ResetN1()` on at a request boundary. All six are built on the same
+`middleware.Guard` and take the same options.
+
+| Module | Hooks | Install |
+| --- | --- | --- |
+| `gormguard` | `gorm.Plugin` callbacks on all six chains | `go get github.com/KARTIKrocks/sqlguard/integrations/gormguard` |
+| `sqlxguard` | Wrapper around `*sqlx.DB` | `go get github.com/KARTIKrocks/sqlguard/integrations/sqlxguard` |
+| `pgxguard` | `pgx.QueryTracer` + `pgx.BatchTracer`; composes with `otelpgx` | `go get github.com/KARTIKrocks/sqlguard/integrations/pgxguard` |
+| `bunguard` | `bun.QueryHook` | `go get github.com/KARTIKrocks/sqlguard/integrations/bunguard` |
+| `xormguard` | xorm `contexts.Hook` | `go get github.com/KARTIKrocks/sqlguard/integrations/xormguard` |
+| `entguard` | Decorates ent's `dialect.Driver` | `go get github.com/KARTIKrocks/sqlguard/integrations/entguard` |
+
+Real-grammar parsers are opt-in modules too:
+`parsers/pgparser` (PostgreSQL) and `parsers/mysqlparser` (MySQL), both pure
+Go.
+
+## Performance
+
+Analysis runs on every intercepted query, so it has to be cheap. Rule
+configuration is resolved once at construction; repeated queries hit an
+exact-string LRU.
+
+```text
+Guard.Check, cache hit       20 ns/op     0 allocs   (repeated query)
+Guard.Check, cache miss      22 µs/op    32 allocs   (full parse + all static rules)
 ```
 
-```go
-import (
-    "github.com/KARTIKrocks/sqlguard/integrations/gormguard"
-    "github.com/KARTIKrocks/sqlguard/middleware"
-)
+Measured on an Intel i5-11400H @ 2.70GHz, Go 1.27, Linux:
+`go test -bench GuardCheck -benchmem ./middleware/`.
 
-gormDB, _ := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+## Security
 
-// Register as GORM plugin — hooks into all queries automatically
-gormguard.Register(gormDB)
+sqlguard's findings flow into logs, so **by default it never emits a raw
+literal value**: `Result.Query` is redacted before any finding leaves the
+process, and `Fingerprint` is always PII-free. The EXPLAIN analyzer never
+executes the statement it plans — input is validated with a comment- and
+string-aware multi-statement check, `ANALYZE` is never used, and every plan
+runs inside a transaction that is always rolled back. Both are treated as
+security invariants, not style preferences.
 
-// Or customize via the standard middleware options
-gormguard.Register(gormDB,
-    middleware.WithSlowQueryThreshold(500*time.Millisecond),
-    middleware.WithN1Detection(10, time.Second),
-)
-```
+Every push and pull request to `main` is scanned by
+[CodeQL](https://github.com/KARTIKrocks/sqlguard/actions/workflows/codeql.yml),
+with a weekly re-scan; `govulncheck` gates every merge on advisories
+reachable from this code's call graph. Both run separately against each of
+the nine modules, because a scan started from the root stops at nested
+`go.mod` boundaries. Dependabot tracks all nine, the docs site, and the
+GitHub Actions themselves.
 
-### sqlx Integration
-
-```bash
-go get github.com/KARTIKrocks/sqlguard/integrations/sqlxguard
-```
-
-```go
-import (
-    "github.com/KARTIKrocks/sqlguard/integrations/sqlxguard"
-    "github.com/KARTIKrocks/sqlguard/middleware"
-)
-
-sqlxDB := sqlx.MustConnect("postgres", dsn)
-
-db := sqlxguard.WrapSqlx(sqlxDB,
-    middleware.WithSlowQueryThreshold(500*time.Millisecond),
-)
-
-var users []User
-db.Select(&users, "SELECT * FROM users") // warns about SELECT *
-```
-
-### pgx Integration (native pgx / pgxpool)
-
-The `database/sql` driver wrapper covers pgx-stdlib (`pgx/v5/stdlib`). For the
-**native pgx APIs** (`pgxpool.Pool`, `pgx.Conn` — which bypass `database/sql`
-entirely) use `pgxguard`. It hooks pgx's own tracer seam, so every
-`Query`/`QueryRow`/`Exec` and every `SendBatch` is analyzed without a wrapper
-type or a method list.
-
-```bash
-go get github.com/KARTIKrocks/sqlguard/integrations/pgxguard
-```
-
-```go
-import (
-    "github.com/KARTIKrocks/sqlguard/integrations/pgxguard"
-    "github.com/KARTIKrocks/sqlguard/middleware"
-    "github.com/jackc/pgx/v5/pgxpool"
-)
-
-cfg, _ := pgxpool.ParseConfig(dsn)
-pgxguard.ApplyPool(cfg,
-    middleware.WithSlowQueryThreshold(50*time.Millisecond),
-    middleware.WithN1Detection(10, time.Second),
-)
-pool, _ := pgxpool.NewWithConfig(ctx, cfg)
-```
-
-`Apply` (for `*pgx.ConnConfig`) and `ApplyPool` (for `*pgxpool.Config`)
-**compose** with any tracer already installed via pgx's own `multitracer`,
-so sqlguard coexists with `otelpgx`, `ddtrace` and friends rather than
-silently overwriting them. Configuration is the standard `middleware.Option`
-set — same as the driver wrapper, no parallel surface to learn.
-
-Coverage: `Query` / `QueryRow` / `Exec` (via `pgx.QueryTracer`) and
-`SendBatch` (via `pgx.BatchTracer`). Prepared-statement execution is already
-covered by `QueryTracer`, so `PrepareTracer` is deliberately omitted to avoid
-double-reporting. `CopyFrom` carries no SQL and is out of scope.
-
-### bun / xorm Integrations
-
-bun and xorm build SQL through their own query layers and expose native
-before/after hook seams. `bunguard` and `xormguard` plug into those seams and
-run every statement through the same shared core — same `middleware.Option`
-set, no parallel surface.
-
-```bash
-go get github.com/KARTIKrocks/sqlguard/integrations/bunguard
-go get github.com/KARTIKrocks/sqlguard/integrations/xormguard
-```
-
-```go
-// bun — register a QueryHook
-db.AddQueryHook(bunguard.New(
-    middleware.WithSlowQueryThreshold(500*time.Millisecond),
-    middleware.WithN1Detection(10, time.Second),
-))
-
-// xorm — register a Hook
-engine.AddHook(xormguard.New(
-    middleware.WithSlowQueryThreshold(500*time.Millisecond),
-))
-```
-
-### ent Integration
-
-ent runs on `database/sql`, so the simplest coverage is to point `entsql` at a
-`*sql.DB` from `sqlguard.Register`/`OpenDB`. `entguard` is the dedicated
-alternative: it decorates ent's own `dialect.Driver`, so it covers every
-`Exec`/`Query` (and transactions it opens) regardless of how the `*sql.DB` was
-created.
-
-```bash
-go get github.com/KARTIKrocks/sqlguard/integrations/entguard
-```
-
-```go
-drv, _ := entsql.Open(dialect.Postgres, dsn)
-guarded := entguard.Wrap(drv,
-    middleware.WithSlowQueryThreshold(500*time.Millisecond),
-    middleware.WithN1Detection(10, time.Second),
-)
-client := ent.NewClient(ent.Driver(guarded))
-```
-
-Every adapter (`gormguard`, `bunguard`, `xormguard`, `entguard`, `pgxguard`,
-`sqlxguard`) exposes a `ResetN1()` you can call at a per-request boundary to
-scope N+1 detection to one unit of work.
-
-### SQL Parsers (accuracy vs. zero dependencies)
-
-By default the analyzer uses a **zero-dependency fallback parser**: it strips
-SQL comments and string-literal contents before pattern matching, so keywords
-inside comments/strings and identifiers like `update_at` no longer cause false
-positives. It never errors — SQL it can't fully understand still yields a
-best-effort result, so analysis never breaks your query path.
-
-For **exact, structural analysis**, opt into a real grammar. These live in
-separate modules so the core stays dependency-free:
-
-```bash
-go get github.com/KARTIKrocks/sqlguard/parsers/pgparser     # PostgreSQL (pure Go, no cgo)
-go get github.com/KARTIKrocks/sqlguard/parsers/mysqlparser  # MySQL (pure Go, no cgo)
-```
-
-```go
-import (
-    "github.com/KARTIKrocks/sqlguard"
-    "github.com/KARTIKrocks/sqlguard/middleware"
-    "github.com/KARTIKrocks/sqlguard/parsers/pgparser"
-)
-
-sqlguard.Register("sqlguard-pg", "pgx", middleware.WithParser(pgparser.New()))
-db, _ := sql.Open("sqlguard-pg", dsn)
-
-// Or with the standalone analyzer:
-a := analyzer.Default().WithParser(pgparser.New())
-```
-
-A real parser drives the false-positive-prone facts (statement kind,
-WHERE/LIMIT/ORDER BY/FROM presence, `SELECT *`, `SELECT DISTINCT`, `OFFSET`,
-explicit INSERT columns) from the AST instead of regex. CTEs, subqueries, and
-dialect syntax are handled correctly; anything the grammar rejects (dynamic SQL,
-driver placeholders) transparently degrades to the fallback parser.
-
-A few facts stay lexical heuristics even with a real parser, because they read
-literal values the AST discards or are intentionally text-level: IN-list size
-(`in-list-too-large`), comma/cartesian joins (`implicit-join` /
-`cartesian-join`), and the literal/text checks (`leading-wildcard`,
-`non-sargable-predicate`, `add-not-null-without-default`). These keep their
-zero-dependency, best-effort behavior regardless of the parser.
-
-### Custom Rules
-
-```go
-import "github.com/KARTIKrocks/sqlguard/analyzer"
-
-// Create analyzer with only the rules you want
-a := analyzer.New(
-    analyzer.CheckDeleteWithoutWhere,
-    analyzer.CheckUpdateWithoutWhere,
-)
-
-// Or use all defaults
-a := analyzer.Default()
-
-// Analyze a query
-results := a.Analyze("DELETE FROM users")
-for _, r := range results {
-    fmt.Printf("[%s] %s: %s\n", r.Severity, r.RuleName, r.Message)
-}
-```
+See [SECURITY.md](SECURITY.md) for the threat model and how to report a
+vulnerability privately.
 
 ## Development
 
 ```bash
-make help       # List all targets
-make all        # tidy, fmt, vet, lint, build, test (all modules)
-make build      # Compile all modules; `make cli` builds bin/sqlguard
-make test       # Run tests across all modules (test-race adds -race)
-make lint       # Run golangci-lint across all modules
-make fmt        # gofmt -s + goimports
-make tidy       # go mod tidy across all modules
-make install    # Install the CLI to $GOPATH/bin
+make help       # every target
+make all        # tidy, fmt, vet, lint, build, test — all nine modules
+make ci         # what CI runs: fmt-check, vet, lint, vuln, test-race, lint-docs
+make cli        # build bin/sqlguard
 ```
 
-## Coverage
-
-The middleware wraps the `database/sql` **driver** chain, so _every_ query
-is analyzed regardless of how it's issued (`Query`/`Exec`/`Prepare`/`Tx`,
-context variants, and any ORM/query builder on top — sqlc, ent, sqlx, gorm,
-pgx-stdlib). There is no method allowlist to keep in sync; you get back a
-real `*sql.DB`.
-
-Opt-in adapter modules, each built on the same `middleware.Guard` core,
-extend coverage to APIs that bypass or sit above the `database/sql` driver
-path:
-
-- **`pgxguard`** — native pgx / pgxpool (which never goes through
-  `database/sql`), via pgx's own tracer seam. Composes with existing tracers
-  (otelpgx, ddtrace) via `multitracer`. Covers `Query`/`QueryRow`/`Exec` and
-  `SendBatch`.
-- **`gormguard`** / **`bunguard`** / **`xormguard`** — hook each ORM's native
-  before/after callback seam (`gorm.Plugin`, `bun.QueryHook`, xorm
-  `contexts.Hook`).
-- **`entguard`** — decorates ent's `dialect.Driver` (Exec/Query + the
-  transactions it opens).
-- **`sqlxguard`** — sqlx-only helpers that build SQL outside the driver path:
-  `Select` / `SelectContext`, `Get` / `GetContext`, `Queryx`, `NamedExec` /
-  `NamedExecContext`.
-
-All six inherit redaction-by-default, stable fingerprints, the parser seam,
-and slow-query/N+1 detection from the shared core, and expose `ResetN1()` for
-per-request scoping.
-
-## Limitations
-
-- The static scanner resolves inline literals, same/cross-package constants,
-  constant concatenation, and `fmt.Sprintf` with a constant format string
-  (via `go/types`); it cannot resolve values only known at runtime.
-- The default fallback parser is best-effort; for exact structural analysis use a real parser module (see _SQL Parsers_ above)
-- EXPLAIN analyzer requires a live database connection; only the `postgres` and `mysql` dialects are supported (`mysql` also covers MariaDB)
+The satellite modules (`integrations/*`, `parsers/*`) are separate Go
+modules; the Makefile targets loop over all of them, `go test ./...` from
+the root does not. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
 [MIT](LICENSE)
+
+## Contributing
+
+Contributions welcome — a new rule is one `analyzer.Register` call and a
+test. Please read [CONTRIBUTING.md](CONTRIBUTING.md) first.
