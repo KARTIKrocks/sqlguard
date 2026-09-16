@@ -1,0 +1,59 @@
+{
+  "docsSidebar": [
+    "intro",
+    "getting-started",
+    {
+      "type": "category",
+      "label": "Runtime",
+      "collapsed": false,
+      "items": [
+        "middleware",
+        "n-plus-one",
+        "noise-control",
+        "redaction"
+      ]
+    },
+    {
+      "type": "category",
+      "label": "Rules",
+      "collapsed": false,
+      "items": [
+        "rules",
+        "suppressions",
+        "configuration"
+      ]
+    },
+    {
+      "type": "category",
+      "label": "CLI",
+      "collapsed": false,
+      "items": [
+        "scan",
+        "explain"
+      ]
+    },
+    {
+      "type": "category",
+      "label": "Integrations",
+      "collapsed": false,
+      "items": [
+        "integrations",
+        "gorm",
+        "sqlx",
+        "pgx",
+        "bun",
+        "xorm",
+        "ent"
+      ]
+    },
+    {
+      "type": "category",
+      "label": "Extending",
+      "collapsed": false,
+      "items": [
+        "parsers",
+        "analyzer"
+      ]
+    }
+  ]
+}

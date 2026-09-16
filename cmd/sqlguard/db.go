@@ -4,6 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+
+	// Drivers for `sqlguard explain`. Only this package imports them, so a
+	// library consumer of analyzer/middleware never links them — Go compiles
+	// per imported package, not per module.
+	_ "github.com/go-sql-driver/mysql"
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 // openDB opens a database connection using the appropriate driver.
@@ -11,7 +17,7 @@ func openDB(ctx context.Context, dialect, dsn string) (*sql.DB, error) {
 	var driverName string
 	switch dialect {
 	case "postgres":
-		driverName = "postgres"
+		driverName = "pgx"
 	case "mysql":
 		driverName = "mysql"
 	default:

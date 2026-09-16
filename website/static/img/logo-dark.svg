@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="sqlguard">
+  <title>sqlguard</title>
+  <!-- Shield -->
+  <path d="M32 4 L54 12 V30 C54 44 44 54.5 32 60 C20 54.5 10 44 10 30 V12 Z" fill="none" stroke="#3b82f6" stroke-width="4" stroke-linejoin="round"/>
+  <!-- Database cylinder -->
+  <g fill="none" stroke="#22d3ee" stroke-width="3.2" stroke-linecap="round">
+    <ellipse cx="32" cy="19.5" rx="11" ry="4"/>
+    <path d="M21 19.5 V34.5 C21 36.7 25.9 38.5 32 38.5 C38.1 38.5 43 36.7 43 34.5 V19.5"/>
+    <path d="M21 27 C21 29.2 25.9 31 32 31 C38.1 31 43 29.2 43 27"/>
+  </g>
+  <!-- Check mark -->
+  <path d="M25.5 46 L30 50.5 L38.5 42" fill="none" stroke="#3b82f6" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

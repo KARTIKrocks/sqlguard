@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go *)",
+      "Bash(gofmt *)",
+      "Bash(golangci-lint run:*)",
+      "Bash(GOFLAGS=-mod=mod go mod tidy)",
+      "Bash(make all *)",
+      "Bash(make ci *)",
+      "Bash(make test *)",
+      "Bash(make test-all *)",
+      "Bash(make lint *)",
+      "Bash(make tidy *)"
+    ]
+  }
+}

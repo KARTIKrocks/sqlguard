@@ -12,12 +12,13 @@ or `parsers/*`, which are separate Go modules. The `MODULES` variable drives the
 loop so a target can't silently skip a satellite.
 
 - `make all` — `tidy fmt vet lint build test` across all modules.
-- `make ci` — the CI pipeline: `fmt-check vet lint vuln test-race`.
+- `make ci` — the CI pipeline: `fmt-check vet lint vuln test-race lint-docs`.
 - `make build` — `go build ./...` in every module (compile check). `make cli` builds the `bin/sqlguard` binary; `make install` installs it.
 - `make test` — `go test -count=1 ./...` in every module. `make test-race` adds `-race`; `make coverage` writes a merged `coverage.out`.
 - `make lint` — `golangci-lint run` in every module (config in `.golangci.yml`, v2 schema). `make fmt` / `make fmt-check` run `gofmt -s` + `goimports`.
 - `make tidy` — `go mod tidy` across all nine modules. Run after any dependency change; tidying only the root leaves the others stale. `make tidy-check` fails (without leaving the change behind) if any module's go.mod/go.sum is stale — CI hygiene, not part of `all`/`ci`.
 - `make vuln` — `govulncheck` in every module, filtered to advisories the code actually reaches. Needs network access (fetches the advisory database each run).
+- `make lint-docs` / `make lint-docs-fix` — markdownlint over every `.md` in the repo (config: `.markdownlint-cli2.jsonc`). Needs Node; the binary comes from `website/node_modules`, installed on first use. Part of `ci`, not `all`.
 - `make setup` — installs pinned `golangci-lint` / `goimports` / `govulncheck` if missing (a prereq of `lint`/`fmt`/`vuln`). `make print-golangci-lint-version` / `make print-govulncheck-version` print the pinned versions so CI resolves them from here instead of a second hardcoded copy.
 - The committed `go.work` makes every satellite compile against this tree, not the published core it `require`s — so a breaking change to `analyzer/`/`middleware/` fails their tests. No `go.mod` here has a `replace`. Use `GOWORK=off` to see a consumer's build. Releasing is manual (see CONTRIBUTING.md).
 - `make db-up` / `make test-integration` / `make db-down` — run `explain/` against live Postgres, MySQL and MariaDB (`test/integration/`, behind the `integration` build tag).
@@ -30,7 +31,7 @@ Run a single test: `go test ./middleware/ -run TestDriver_QueryDetectsSelectStar
 
 Nine Go modules, all on **Go 1.27**, kept in lockstep:
 
-- root (`github.com/KARTIKrocks/sqlguard`) — core analyzer, middleware, reporter, `config`, CLI. Near-zero-dependency: `analyzer`/`middleware`/`reporter` stay dependency-free; the only third-party deps are sqlite3 (CLI `db`/tests), cobra (CLI), and `gopkg.in/yaml.v3` (isolated to the `config` package). Importing `analyzer`/`middleware` does not pull YAML.
+- root (`github.com/KARTIKrocks/sqlguard`) — core analyzer, middleware, reporter, `config`, CLI. Near-zero-dependency: `analyzer`/`middleware`/`reporter` stay dependency-free; the only third-party deps are `gopkg.in/yaml.v3` (isolated to the `config` package) and the CLI's own — cobra, `x/tools` (scanner), sqlite3 (tests), and the `pgx/v5/stdlib` + `go-sql-driver/mysql` drivers that `cmd/sqlguard/db.go` blank-imports so `sqlguard explain` can connect. Go compiles per imported package, so a library consumer of `analyzer`/`middleware` links none of the CLI's deps. Importing `analyzer`/`middleware` does not pull YAML.
 - `parsers/pgparser`, `parsers/mysqlparser` — opt-in real SQL grammars, isolated in their own modules so the heavy parser deps never enter a consumer's build unless explicitly imported.
 - `integrations/gormguard`, `integrations/sqlxguard`, `integrations/pgxguard`, `integrations/bunguard`, `integrations/xormguard`, `integrations/entguard` — ORM/driver adapters, also separate so their deps stay opt-in. **Every integration is now built on the exported `middleware.Guard` core**, so all inherit redaction-by-default, stable fingerprints, the parser seam, slow-query and N+1 with no parallel option surface. `pgxguard` covers native pgx/pgxpool (which bypasses `database/sql`) via pgx's tracer seam; `gormguard`/`bunguard`/`xormguard` hook each ORM's native before/after callback seam (`gorm.Plugin`, `bun.QueryHook`, xorm `contexts.Hook`); `entguard` decorates ent's `dialect.Driver` (Exec/Query + transactions). `gormguard`/`sqlxguard` were migrated to the shared core in roadmap item 11.1.
 
@@ -55,6 +56,51 @@ When changing the public API or Go version, update all nine `go.mod` files and `
 **Redaction is the default, and there is one canonical normalizer.** `analyzer/redact.go` holds `Redact` (single-quoted string + numeric literals → `?`, comments stripped, identifiers/structure preserved — reuses the FallbackParser's comment/literal lexer, never errors) and `Fingerprint` (`Redact` + whitespace-collapse + `(?, ?, ?)`→`(?)` list-fold). `Result.Query` is redacted **before any Result leaves the process** so literals never reach a log sink; `Result.Fingerprint` is **always** set (PII-free, low-cardinality, safe as a metric label). Policy lives on the `Analyzer` (`rawQuery` field, default redact; `WithRawQuery()` opt-out; `Profile.RawQuery` / config `redact: false`); `Analyze` sets `Query`/`Fingerprint` on every result centrally, and direct-built findings (slow-query in `guard.go`, n+1) go through `Analyzer.PrepareQuery`. **Do not add a second normalizer** — `middleware.normalizeQuery` delegates to `analyzer.Fingerprint`; the N+1 group key _is_ the fingerprint. `explain` keeps `Query` raw (the user typed it on their own CLI) but still sets `Fingerprint`.
 
 **`explain` is hostile-input-validated, never executes.** `explain.validate` rejects empty input, uses `analyzer.IsMultiStatement` (comment/string-literal-aware — a `;` in a `--`/`/* */`/string can't smuggle a second statement) instead of `strings.Contains(query, ";")`, and classifies via the FallbackParser: `SELECT`/`WITH` only by default, DML behind `explain.WithAllowDML()` (CLI `--allow-dml`), everything else refused. Every EXPLAIN runs in a `BeginTx(ReadOnly:true)` + deferred `Rollback` (Postgres _and_ MySQL) and never uses `ANALYZE`, so it is plan-only and cannot commit. EXPLAIN takes no bind params, so concatenation is unavoidable by design — the defense is `validate` + the rolled-back read-only tx, not parameterization; keep both.
+
+## Documentation website
+
+The docs site lives on `main` in **`website/`** and is built with **Docusaurus**
+(TypeScript, Biome for lint/format). It is published to GitHub Pages by
+`.github/workflows/docs.yml` on every push to `main` that touches `website/` —
+there is no manual deploy step and nothing to mirror onto another branch.
+
+```bash
+cd website
+npm ci
+npm start          # preview at localhost:3000/sqlguard/
+npm run check      # lint + typecheck + build — what the Docs workflow runs
+```
+
+`npm run lint` is `biome check`, which covers formatting as well as linting.
+Biome has no Markdown support, so prose is linted separately and repo-wide with
+`make lint-docs` (config: `.markdownlint-cli2.jsonc`); that job runs in `ci.yml`,
+not `docs.yml`, because `docs.yml` is path-filtered to `website/**` and would
+never see a README change.
+
+**Versioning is by snapshot, not per release.** `website/docs/` is the
+unreleased/current documentation (served at `/docs/next/`);
+`website/versioned_docs/version-0.2/` is a frozen snapshot of what a released
+version does (served at `/docs/`). Versions are `MAJOR.MINOR`.
+
+- **Never edit `website/versioned_docs/`.** Changing a snapshot rewrites history
+  for users still on that version. Snapshots are cut deliberately with
+  `npm run cut-version -- X.Y` (`website/scripts/cut-version.mjs`); see
+  `website/VERSIONING.md` for when a release earns one.
+- **Public API change** — update the matching page under `website/docs/` and mark
+  the version inline rather than cutting a new snapshot: append `_0.3+_` to an
+  API table cell, open a paragraph with `_Added in 0.3._`, add a trailing
+  `// 0.3+` comment in a code block, or write `_Changed in 0.3._` plus one line
+  on the previous behaviour.
+- **Names must be exact.** Every option, function and rule name in the docs
+  must match an exported identifier or registered rule name; check the source
+  before writing one.
+- **Blog** is wired up but has no posts, so the navbar/footer carry no Blog
+  link; add the links in `docusaurus.config.ts` together with the first post.
+
+Internal links are checked at build time (`onBrokenLinks: 'throw'`), so a
+renamed page fails the Docs workflow rather than shipping a dead link. External
+links are **not** checked. `website/docs/intro.md` has `slug: /`, so its links
+must be file-relative (`./middleware.md`), not id-relative.
 
 ## Conventions
 

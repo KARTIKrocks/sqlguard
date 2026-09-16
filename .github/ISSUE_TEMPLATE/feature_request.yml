@@ -1,0 +1,56 @@
+name: Feature Request
+description: Suggest a new rule, integration, or capability
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting a feature! Please describe it below.
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind of request
+      options:
+        - New detection rule
+        - New integration (ORM / driver)
+        - New parser dialect
+        - Change to an existing rule or option
+        - Something else
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to catch or do that sqlguard can't today?
+      placeholder: "I'm always frustrated when ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: >-
+        How would you like this to work? For a **new rule**, include the
+        SQL anti-pattern, example queries that should and should **not**
+        trigger it, a suggested severity (info / warning / critical), and any
+        tunable with its default. For a **new integration**, name the
+        ORM/driver and its hook/seam.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches, workarounds, or existing rules/config that almost fit.
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Links, prior art, willingness to send a PR.

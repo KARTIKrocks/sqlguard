@@ -3,8 +3,8 @@
   "commentTypes": ["logic", "syntax", "style"],
   "triggerOnUpdates": true,
   "statusCheck": true,
-  "ignorePatterns": "bin/**\ndist/**\n**/testdata/**\n**/go.sum\n**/vendor/**\n**/node_modules/**",
-  "instructions": "sqlguard (github.com/KARTIKrocks/sqlguard) is a near-zero-dependency, security-conscious SQL query analyzer for Go: a database/sql driver-layer middleware plus a static CLI scanner plus an EXPLAIN-plan analyzer, sharing one analyzer/reporter core. It is pre-1.0, nine Go modules kept in lockstep (root + parsers/pgparser + parsers/mysqlparser + six integrations/*), and it is a defensive security tool: a bug that lets it silently miss a dangerous query, leak a raw literal, or actually execute a statement during EXPLAIN is a security bug, not a style nit — see SECURITY.md's threat model. Prioritize fail-closed behavior, PII redaction, and not altering query semantics over style. See AGENTS.md for architecture and .greptile/rules.md for pattern rationale and worked examples from real bugs found in this codebase.",
+  "ignorePatterns": "bin/**\ndist/**\n**/testdata/**\n**/go.sum\n**/vendor/**\n**/node_modules/**\n**/package-lock.json\nwebsite/versioned_docs/**\nwebsite/versioned_sidebars/**\nwebsite/static/**",
+  "instructions": "sqlguard (github.com/KARTIKrocks/sqlguard) is a near-zero-dependency, security-conscious SQL query analyzer for Go: a database/sql driver-layer middleware plus a static CLI scanner plus an EXPLAIN-plan analyzer, sharing one analyzer/reporter core. It is pre-1.0, nine Go modules kept in lockstep (root + parsers/pgparser + parsers/mysqlparser + six integrations/*), and it is a defensive security tool: a bug that lets it silently miss a dangerous query, leak a raw literal, or actually execute a statement during EXPLAIN is a security bug, not a style nit — see SECURITY.md's threat model. Prioritize fail-closed behavior, PII redaction, and not altering query semantics over style. The docs site (website/, Docusaurus) is versioned by snapshot: website/docs/ is the unreleased tree and website/versioned_docs/ is frozen history. See AGENTS.md for architecture and .greptile/rules.md for pattern rationale and worked examples from real bugs found in this codebase.",
   "rules": [
     {
       "id": "fail-closed-on-unknown-shape",
@@ -59,6 +59,18 @@
       "rule": "analyzer.Analyze and middleware.Guard.Check run on every intercepted query. Flag a new heap allocation, map creation, or unbounded work added to that path — config resolution and rule enable/disable must happen once at construction (Profile / DefaultWithProfile), never per query. If an allocation is genuinely unavoidable there, say so explicitly rather than flagging it as an oversight.",
       "scope": ["analyzer/**/*.go", "middleware/**/*.go"],
       "severity": "medium"
+    },
+    {
+      "id": "website-docs-version-markers",
+      "rule": "A documented API addition on this page must carry a version marker in one of these exact forms: '_X.Y+_' appended to a table cell's description, '_Added in X.Y._' opening a prose paragraph, or a trailing '// X.Y+' comment inside a code block. Documented behaviour that changed must use '_Changed in X.Y._' followed by one line describing the prior behaviour. Every option, function and rule name must match an exported identifier or registered rule name exactly — flag a name that does not exist in the Go source. See website/VERSIONING.md rules 1 and 2. Never suggest an edit to website/versioned_docs/ — those are frozen release snapshots.",
+      "scope": ["website/docs/**/*.md"],
+      "severity": "medium"
+    },
+    {
+      "id": "go-exported-docs",
+      "rule": "Every new or newly-exported type, function, method, and constant must have a doc comment that starts with the identifier's own name (revive's `exported` rule is enabled in .golangci.yml).",
+      "scope": ["**/*.go"],
+      "severity": "low"
     }
   ]
 }

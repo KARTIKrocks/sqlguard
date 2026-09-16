@@ -1,6 +1,10 @@
 GOLANGCI_LINT_VERSION := v2.13.2
-GOIMPORTS_VERSION := v0.45.0
+GOIMPORTS_VERSION := v0.50.0
 GOVULNCHECK_VERSION := v1.8.0
+
+# The Markdown linter. Versioned in website/package.json rather than pinned
+# here, so Dependabot keeps it current along with the rest of the docs toolchain.
+MARKDOWNLINT := website/node_modules/.bin/markdownlint-cli2
 
 # Sub-modules carry their own go.mod (heavy/opt-in deps kept out of the core
 # import graph). `go test ./...` from root does NOT reach them, so every
@@ -29,7 +33,7 @@ SQLGUARD_TEST_PG_DSN ?= postgres://sqlguard:sqlguard@localhost:55432/sqlguard?ss
 SQLGUARD_TEST_MYSQL_DSN ?= root:sqlguard@tcp(localhost:53306)/sqlguard
 SQLGUARD_TEST_MARIADB_DSN ?= root:sqlguard@tcp(localhost:53307)/sqlguard
 
-.PHONY: all help setup deps ci test test-v test-race coverage lint lint-fix fix fmt fmt-check vet tidy tidy-check build cli install bench clean db-up db-down test-integration vet-integration vuln print-golangci-lint-version print-govulncheck-version
+.PHONY: all help setup deps ci test test-v test-race coverage lint lint-fix lint-docs lint-docs-fix fix fmt fmt-check vet tidy tidy-check build cli install bench clean db-up db-down test-integration vet-integration vuln print-golangci-lint-version print-govulncheck-version
 
 all: tidy fmt vet lint build test
 
@@ -39,7 +43,7 @@ help:
 	@echo "  all           - Tidy, format, vet, lint, build, test (all modules)"
 	@echo "  setup         - Install development tools"
 	@echo "  deps          - Download module dependencies (all modules)"
-	@echo "  ci            - CI pipeline (fmt-check, vet, lint, test-race)"
+	@echo "  ci            - CI pipeline (fmt-check, vet, lint, vuln, test-race, lint-docs)"
 	@echo "  test          - Run tests across all modules"
 	@echo "  test-v        - Run tests with verbose output (all modules)"
 	@echo "  test-race     - Run tests with race detector (all modules)"
@@ -50,7 +54,9 @@ help:
 	@echo "  vet           - Run go vet (all modules)"
 	@echo "  lint          - Run golangci-lint (all modules)"
 	@echo "  lint-fix      - Run golangci-lint with --fix (root module)"
-	@echo "  fix           - fmt + lint-fix"
+	@echo "  lint-docs     - Lint every Markdown file in the repo (needs Node)"
+	@echo "  lint-docs-fix - Lint Markdown and apply automatic fixes"
+	@echo "  fix           - fmt + lint-fix + lint-docs-fix"
 	@echo "  fmt           - Format code (gofmt -s + goimports)"
 	@echo "  fmt-check     - Verify formatting without modifying files"
 	@echo "  tidy          - Run go mod tidy (all modules)"
@@ -84,8 +90,10 @@ deps:
 		(cd $$mod && go mod download) || exit 1; \
 	done
 
-## CI: run formatting check, vet, lint, vulnerability scan and tests with race detector
-ci: fmt-check vet lint vuln test-race
+## CI: formatting check, vet, lint, vulnerability scan, tests with the race
+## detector, plus Markdown across the repo. Heavier than `all` on purpose — it
+## needs the network for the advisory database and Node for the Markdown linter.
+ci: fmt-check vet lint vuln test-race lint-docs
 
 ## Build all packages across all modules (compile check)
 build:
@@ -169,8 +177,23 @@ lint: setup
 lint-fix: setup
 	golangci-lint run --fix ./...
 
+## Lint every Markdown file in the repo — the docs site, the README, and the
+## contributor/security policies. Config and rationale live in
+## .markdownlint-cli2.jsonc. Needs Node; the binary comes from website/, which
+## is the only npm project here.
+lint-docs: $(MARKDOWNLINT)
+	@$(MARKDOWNLINT)
+
+## Lint Markdown and apply the fixes it can make automatically.
+lint-docs-fix: $(MARKDOWNLINT)
+	@$(MARKDOWNLINT) --fix
+
+$(MARKDOWNLINT):
+	@echo "Installing website dependencies (needed for the Markdown linter)..."
+	@cd website && npm ci
+
 ## Fix code formatting and linting issues
-fix: fmt lint-fix
+fix: fmt lint-fix lint-docs-fix
 
 ## Format code (recurses the whole tree, all modules)
 fmt: setup

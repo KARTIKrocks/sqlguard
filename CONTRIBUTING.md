@@ -34,7 +34,7 @@ depends on these modules. To reproduce a consumer's build, set `GOWORK=off`.
 ```bash
 make setup      # install pinned golangci-lint + goimports + govulncheck (one-time)
 make all        # tidy, fmt, vet, lint, build, test across all nine modules
-make ci         # what CI runs: fmt-check, vet, lint, vuln, test-race
+make ci         # what CI runs: fmt-check, vet, lint, vuln, test-race, lint-docs
 make test-race  # race detector (required for anything touching middleware)
 make help       # list every target
 ```
@@ -107,6 +107,23 @@ it will catch a satellite whose required core version predates an API it uses.
   / `Fingerprint`) — don't add a second.
 - See [`AGENTS.md`](AGENTS.md) for the deeper architecture notes and invariants.
 
+## Documentation
+
+The docs site lives in [`website/`](website/) (Docusaurus) and is deployed from
+`main` on every push that touches it — see [`website/README.md`](website/README.md).
+
+- A change to documented behaviour edits the matching page under
+  `website/docs/` in the **same PR**, with a version marker for anything new
+  (`_0.3+_` in a table cell, `_Added in 0.3._` opening a paragraph, `// 0.3+`
+  in a code block). Never edit `website/versioned_docs/` — those are frozen
+  release snapshots; [`website/VERSIONING.md`](website/VERSIONING.md) explains
+  when a new one is cut.
+- Every option and function name in the docs must match an exported
+  identifier exactly.
+- `make lint-docs` runs markdownlint over every `.md` in the repo (needs
+  Node); it is part of `make ci`. `cd website && npm run check` runs the
+  site's own lint, typecheck and build.
+
 ## Adding a detection rule
 
 Rules self-register. Write the rule, then add one `analyzer.Register(RuleSpec{
@@ -117,7 +134,8 @@ do **not** hand-maintain a rule list. Rules read the normalized `Statement`,
 never raw SQL.
 
 If your rule has a tunable, read it from `Settings` in the factory and document
-it in [`.sqlguard.example.yml`](.sqlguard.example.yml).
+it in [`.sqlguard.example.yml`](.sqlguard.example.yml). Add the rule to the
+reference table and a section in `website/docs/rules.md`.
 
 ## Adding an integration
 
@@ -129,7 +147,7 @@ integration should expose `ResetN1()` for per-request scoping.
 ## Pull requests
 
 1. Fork and branch from `main`.
-2. Keep changes focused; update docs (`README.md`, `AGENTS.md`,
+2. Keep changes focused; update docs (`website/docs/`, `AGENTS.md`,
    `.sqlguard.example.yml`) when behavior or config changes.
 3. Add tests for new behavior; where practical, also prove the failure mode
    (e.g. a bug-reintroduction check).
