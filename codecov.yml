@@ -29,3 +29,4 @@ ignore:
   - "examples/**"
   - "**/*_test.go"
   - "cmd/sqlguard/main.go"
+  - "website/**"

@@ -18,9 +18,6 @@ coverage.*
 *.coverprofile
 profile.cov
 
-# FE
-sqlguard-website
-
 # Dependency directories (remove the comment below to include it)
 # vendor/
 
@@ -40,3 +37,6 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Claude Code personal settings (shared config is .claude/settings.json)
+.claude/settings.local.json
