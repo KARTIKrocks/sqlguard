@@ -80,3 +80,19 @@ this codebase's deliberate, range-checked `int`/`int64` conversions. The real
 injection and file/crypto checks stay on. Don't read the `G115` exclusion as
 license to relax other gosec findings, and don't suggest re-enabling `G115`
 without also fixing the conversions it flags.
+
+## Docs are versioned by snapshot, not per release
+
+`website/docs/` is the unreleased documentation (served at `/docs/next/`);
+`website/versioned_docs/version-X.Y/` is a frozen snapshot of a released
+version (the newest one serves `/docs/`). A PR that changes documented
+behaviour edits `website/docs/` and marks the version inline — `_0.3+_` in a
+table cell, `_Added in 0.3._` opening a paragraph, `// 0.3+` in a code block,
+`_Changed in 0.3._` plus a line on the old behaviour — rather than cutting a
+new snapshot; snapshots are cut deliberately with `npm run cut-version` when
+a release makes an existing page wrong for readers on the previous version
+(`website/VERSIONING.md`). Never suggest editing a snapshot: it documents what
+a shipped version does, and changing it rewrites history for users still on
+it. The one thing worth being strict about in `website/docs/` is names — an
+option like `WithFindingDedup` or a rule like `select-without-limit` written
+wrong in the docs is a support burden, so check them against the source.

@@ -9,6 +9,36 @@ the same version in lockstep.
 
 ## [Unreleased]
 
+### Added
+
+- **Documentation site** at <https://kartikrocks.github.io/sqlguard/>, built
+  with Docusaurus from `website/` and deployed from `main` by
+  `.github/workflows/docs.yml`. Docs are versioned by snapshot (`0.2` is the
+  first); see `website/VERSIONING.md`. `make lint-docs` lints every Markdown
+  file in the repo (`.markdownlint-cli2.jsonc`) and is part of `make ci` and
+  the CI workflow.
+- Project logo, favicon and social card under `website/static/img/`.
+
+### Changed
+
+- README restructured as a landing page: logo, "Why sqlguard?" comparison,
+  quick start, and a guide index pointing at the docs site. The deep
+  per-feature sections moved to the site.
+- Issue templates are now GitHub issue forms (`.yml`) with structured fields
+  for the entry surface, parser and versions.
+- `goimports` pinned to v0.50.0 (was v0.45.0).
+- Dependabot also tracks the docs site's npm dependencies, grouped so
+  Docusaurus bumps do not bury the Go module PRs.
+
+### Fixed
+
+- **CLI `explain` could not connect to any database**: the binary linked no
+  SQL driver, so every invocation failed with
+  `sql: unknown driver "postgres" (forgotten import?)`. `cmd/sqlguard` now
+  imports `github.com/jackc/pgx/v5/stdlib` and
+  `github.com/go-sql-driver/mysql`. Only the CLI package imports them, so
+  library consumers of `analyzer`/`middleware` do not compile them in.
+
 ## [0.2.0] - 2026-09-14
 
 Raises the minimum Go version. No public API changed.

@@ -39,6 +39,17 @@ reviews:
     - "!bin/**"
     - "!dist/**"
     - "!**/testdata/**"
+    - "!**/node_modules/**"
+    - "!**/package-lock.json"
+    # Frozen snapshots of website/docs taken at release time. A docs change
+    # lands in website/docs only — snapshots are produced by cut-version and
+    # are never hand-edited, so any suggestion here is unactionable by
+    # definition: a published snapshot documents the behaviour of a shipped
+    # version, and changing it rewrites history for users still on it.
+    - "!website/versioned_docs/**"
+    - "!website/versioned_sidebars/**"
+    # Generated raster assets and the logo SVGs; nothing to review as text.
+    - "!website/static/**"
 
   path_instructions:
     - path: "**/*.go"
@@ -159,18 +170,54 @@ reviews:
         failure mode (e.g. a bug-reintroduction check) where practical. errcheck
         is intentionally relaxed in tests.
 
+    - path: "cmd/sqlguard/**"
+      instructions: >-
+        The CLI. cmd/sqlguard/db.go blank-imports pgx/v5/stdlib and
+        go-sql-driver/mysql so `sqlguard explain` can connect; only this
+        package imports them, so library consumers of analyzer/middleware never
+        link them — do not flag those imports as a core-dependency violation,
+        and do not suggest moving them into explain/ (that WOULD put drivers in
+        the library import graph).
+
+    - path: "website/docs/**"
+      instructions: >-
+        Docusaurus source for the unreleased docs. Verify every Go snippet
+        compiles against the current API and that option, function and rule
+        names match the exported identifiers / registered rule names exactly —
+        a wrong name here is a support burden, not a typo. This site is
+        versioned by snapshot, not per release: additive changes are marked
+        inline instead of being snapshotted, so check that anything documenting
+        a new API carries its version marker — `_0.3+_` appended to an API
+        table's description cell, `_Added in 0.3._` opening a prose paragraph,
+        or a trailing `// 0.3+` comment inside a code block. Behaviour that
+        changed takes `_Changed in 0.3._` plus a line on what it was before.
+        See website/VERSIONING.md rules 1 and 2. Do not suggest edits to
+        website/versioned_docs; those are frozen release snapshots.
+
+    - path: "website/**/*.{ts,tsx,css,json,mjs}"
+      instructions: >-
+        Docusaurus site code, linted and formatted by Biome (website/biome.json)
+        and type-checked by TypeScript 7 (website/tsconfig.json deliberately
+        inlines @docusaurus/tsconfig because TS 7 removed baseUrl). Keep
+        docusaurus.config.ts and scripts/cut-version.mjs reading
+        MAX_LIVE_VERSIONS from versions.config.json rather than duplicating it.
+        Node-side files (config, sidebars, scripts) must not use browser APIs.
+
   # CodeRabbit can also run linters/scanners and fold results into the review.
   tools:
     golangci-lint:
       enabled: true # uses the repo's .golangci.yml (v2 schema)
+      config_file: .golangci.yml
     gitleaks:
       enabled: true # secret scanning — important for a security-adjacent tool
     yamllint:
       enabled: true # also lints test/integration/docker-compose.yml
     actionlint:
-      enabled: true # lints .github/workflows/ci.yml
+      enabled: true # lints .github/workflows/{ci,codeql,docs}.yml
     markdownlint:
-      enabled: true
+      enabled: true # config: .markdownlint-cli2.jsonc (same as `make lint-docs`)
+    biome:
+      enabled: true # website/ — config: website/biome.json
 
 chat:
   auto_reply: true
