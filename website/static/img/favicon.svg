@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="sqlguard">
+  <title>sqlguard</title>
+  <defs>
+    <linearGradient id="sqlguardFavicon" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset="1" stop-color="#2563eb"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="url(#sqlguardFavicon)"/>
+  <!-- Shield -->
+  <path d="M32 9 L50 15.5 V30 C50 41.5 42 50 32 54.5 C22 50 14 41.5 14 30 V15.5 Z" fill="none" stroke="#fff" stroke-width="3.4" stroke-linejoin="round"/>
+  <!-- Database cylinder -->
+  <g fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round">
+    <ellipse cx="32" cy="21.5" rx="8.5" ry="3.1"/>
+    <path d="M23.5 21.5 V33 C23.5 34.7 27.3 36.1 32 36.1 C36.7 36.1 40.5 34.7 40.5 33 V21.5"/>
+    <path d="M23.5 27.3 C23.5 29 27.3 30.4 32 30.4 C36.7 30.4 40.5 29 40.5 27.3"/>
+  </g>
+  <!-- Check mark -->
+  <path d="M27 42.5 L30.5 46 L37 39.5" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
