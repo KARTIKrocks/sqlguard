@@ -80,9 +80,23 @@ if (newest) {
   }
 }
 
+// Run the Docusaurus CLI entry point with the current Node binary rather than
+// spawning `npx`: on Windows that is `npx.cmd`, which Node >= 20.12 refuses to
+// spawn without a shell (CVE-2024-27980 hardening), so the cut would die with
+// ENOENT/EINVAL after printing "Cutting...". This is the same file `npm run
+// docusaurus` resolves to.
+const docusaurusCli = path.join(
+  siteDir,
+  'node_modules',
+  '@docusaurus',
+  'core',
+  'bin',
+  'docusaurus.mjs',
+);
+
 console.log(`Cutting docs version ${version}...`);
 try {
-  execFileSync('npx', ['docusaurus', 'docs:version', version], {
+  execFileSync(process.execPath, [docusaurusCli, 'docs:version', version], {
     cwd: siteDir,
     stdio: 'inherit',
   });
