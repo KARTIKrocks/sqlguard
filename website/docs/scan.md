@@ -25,6 +25,12 @@ The scan is always recursive, so a path may be written plainly (`./internal`)
 or with the Go package-pattern suffix (`./internal/...`); both select the same
 files. With no path at all it scans the current directory.
 
+A trailing `...` is always read as the pattern, as it is in every Go tool. If
+you genuinely have a directory named `...`, add a trailing slash
+(`./queries/.../`) to address it — and sqlguard says so on stderr when the
+argument is ambiguous, rather than reporting a clean run for a tree it never
+opened.
+
 _Changed in 0.3._ In 0.2 the pattern spelling was rejected outright —
 `sqlguard scan ./...` failed with `lstat ./...: no such file or directory` —
 so the form used throughout these docs had to be written as `sqlguard scan .`.

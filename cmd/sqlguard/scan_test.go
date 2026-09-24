@@ -991,3 +991,77 @@ func TestNewReporter_EachCallGetsItsOwnWriteError(t *testing.T) {
 		t.Errorf("the healthy reporter did not write its report:\n%s", sink.String())
 	}
 }
+
+// TestScan_DotsDirectoryWarns covers the one spelling where the pattern
+// reading hides a real directory. `...` stays a pattern — that is what every
+// Go tool does, and the go command cannot address such a directory at all —
+// but the run must say so, or a clean exit looks like the named tree was
+// examined when it was never opened.
+func TestScan_DotsDirectoryWarns(t *testing.T) {
+	root := t.TempDir()
+	queries := filepath.Join(root, "queries")
+	dots := filepath.Join(queries, "...")
+	if err := os.MkdirAll(dots, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	createTestFile(t, dots, "hidden.go", `package dots
+import "database/sql"
+func f(db *sql.DB) {
+	db.Exec("DELETE FROM audit_log")
+}
+`)
+	createTestFile(t, queries, "sibling.go", `package queries
+import "database/sql"
+func g(db *sql.DB) {
+	db.Query("SELECT id FROM t WHERE id = ? LIMIT 1", 1)
+}
+`)
+	noConfigFlag = true
+	t.Cleanup(func() { noConfigFlag = false })
+
+	// The pattern reading wins, and says so.
+	_, stderr, err := captureScanStreams(t, filepath.Join(queries, "..."), "console")
+	if err != nil {
+		t.Fatalf("expected a clean scan of the parent, got %v", err)
+	}
+	if !strings.Contains(stderr, "both a package pattern and an existing directory") {
+		t.Errorf("ambiguity was not reported:\n%s", stderr)
+	}
+	if strings.Contains(stderr, "delete-without-where") {
+		t.Errorf("pattern reading should not have entered the dots directory:\n%s", stderr)
+	}
+
+	// The trailing separator reaches the directory itself.
+	_, stderr, err = captureScanStreams(t, dots+string(filepath.Separator), "console")
+	if !errors.Is(err, errIssuesFound) {
+		t.Fatalf("trailing-separator form should scan the directory, got %v", err)
+	}
+	if !strings.Contains(stderr, "delete-without-where") {
+		t.Errorf("trailing-separator form missed the finding:\n%s", stderr)
+	}
+	if strings.Contains(stderr, "both a package pattern") {
+		t.Errorf("unambiguous form should not warn:\n%s", stderr)
+	}
+}
+
+// TestScan_NoWarningWithoutDotsDirectory keeps the warning off the ordinary
+// path: `./pkg/...` where no such directory exists must stay silent.
+func TestScan_NoWarningWithoutDotsDirectory(t *testing.T) {
+	dir := t.TempDir()
+	createTestFile(t, dir, "a.go", `package example
+import "database/sql"
+func f(db *sql.DB) {
+	db.Query("SELECT id FROM t WHERE id = ? LIMIT 1", 1)
+}
+`)
+	noConfigFlag = true
+	t.Cleanup(func() { noConfigFlag = false })
+
+	_, stderr, err := captureScanStreams(t, filepath.Join(dir, "..."), "console")
+	if err != nil {
+		t.Fatalf("expected a clean scan, got %v", err)
+	}
+	if strings.Contains(stderr, "both a package pattern") {
+		t.Errorf("warned with no dots directory present:\n%s", stderr)
+	}
+}

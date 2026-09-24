@@ -60,6 +60,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 	dir := "."
 	if len(args) > 0 {
 		dir = trimPatternSuffix(args[0])
+		warnDotsDirectory(args[0], dir)
 	}
 
 	rep, writeErr, err := newReporter(formatFlag)
@@ -130,6 +131,34 @@ func trimPatternSuffixSep(path string, sep rune) string {
 		return trimmed + string(sep)
 	}
 	return trimmed
+}
+
+// warnDotsDirectory breaks the silence in the one case where reading `...` as
+// a pattern hides a real directory.
+//
+// `...` is a pattern in every Go tool, and the go command cannot address a
+// directory of that name at all — `go list ./q/...` never yields the package
+// in a literal `q/...`. So the pattern reading wins here too, unconditionally:
+// deciding by what happens to be on disk would make `scan ./q/...` stop being
+// recursive the day somebody created `q/...`, which is a worse surprise than
+// the one it avoids.
+//
+// The directory is still reachable, via a trailing separator (`./q/.../`),
+// which is more than the go command offers. What is not acceptable is doing
+// this silently: without the warning, a clean exit would look like the named
+// tree was examined.
+func warnDotsDirectory(arg, scanned string) {
+	if arg == scanned {
+		return
+	}
+	info, err := os.Stat(arg)
+	if err != nil || !info.IsDir() {
+		return
+	}
+	_, _ = fmt.Fprintf(os.Stderr,
+		"sqlguard: %q is both a package pattern and an existing directory; "+
+			"scanning %q recursively. Use %q to scan that directory itself.\n",
+		arg, scanned, arg+string(filepath.Separator))
 }
 
 // checkedWriter remembers the first write error. reporter.Reporter cannot
