@@ -67,6 +67,10 @@ the same version in lockstep.
 
 ### Fixed
 
+- **CLI `scan` rejected the `./...` path every doc example uses**, failing with
+  `scan failed: lstat ./...: no such file or directory`. The scan has always
+  been recursive, so the pattern suffix is now trimmed and `./pkg/...` selects
+  exactly what `./pkg` does.
 - **CLI `explain` could not connect to any database**: the binary linked no
   SQL driver, so every invocation failed with
   `sql: unknown driver "postgres" (forgotten import?)`. `cmd/sqlguard` now
