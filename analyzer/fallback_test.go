@@ -109,3 +109,39 @@ func TestFallback_MultiStatementLeadingKind(t *testing.T) {
 		t.Errorf("multi-statement: got kind %v, want StmtDelete (leading statement)", st.Kind)
 	}
 }
+
+// TestFallbackParserDollarQuotedBody pins that a dollar-quoted body is data,
+// not structure. stripComments copies such a body verbatim (a comment marker
+// inside one is data), so blankStringLiterals has to blank it — otherwise the
+// body's own text reaches the clause regexes and a keyword in a value reads as
+// a clause the statement does not have.
+func TestFallbackParserDollarQuotedBody(t *testing.T) {
+	cases := []struct {
+		name string
+		sql  string
+		want Statement // only the fields asserted below
+	}{
+		{"limit keyword in a value", `SELECT * FROM t WHERE note = $$LIMIT 1$$`,
+			Statement{HasLimit: false, HasOrderBy: false, HasWhere: true}},
+		{"order by keyword in a value", `SELECT * FROM t WHERE note = $$ORDER BY x$$`,
+			Statement{HasLimit: false, HasOrderBy: false, HasWhere: true}},
+		{"where keyword in a tagged value", `SELECT * FROM t WHERE n = $tag$WHERE x$tag$ LIMIT 5`,
+			Statement{HasLimit: true, HasOrderBy: false, HasWhere: true}},
+		{"real clauses still detected", `SELECT * FROM t WHERE a = $$x$$ ORDER BY b LIMIT 5`,
+			Statement{HasLimit: true, HasOrderBy: true, HasWhere: true}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			st, _ := NewFallbackParser().Parse(c.sql)
+			if st.HasLimit != c.want.HasLimit {
+				t.Errorf("HasLimit = %v, want %v", st.HasLimit, c.want.HasLimit)
+			}
+			if st.HasOrderBy != c.want.HasOrderBy {
+				t.Errorf("HasOrderBy = %v, want %v", st.HasOrderBy, c.want.HasOrderBy)
+			}
+			if st.HasWhere != c.want.HasWhere {
+				t.Errorf("HasWhere = %v, want %v", st.HasWhere, c.want.HasWhere)
+			}
+		})
+	}
+}

@@ -105,16 +105,38 @@ func foldRedacted(redacted string) string {
 // literal — the evasion the brittle strings.Contains(query, ";") check
 // allowed. A single trailing ";" is not multi-statement.
 //
-// Note that this deliberately uses the *narrowest* reading of a literal (no
-// backslash escapes), which is the opposite of what Redact does. The two have
-// opposite fail-safe directions: Redact must never leave a byte of a literal
-// in its output, so it over-consumes; IsMultiStatement must never miss a
-// statement separator, so it under-consumes. Treating "\'" as an escape here
-// would let `'a\'; DROP TABLE t; --'` read as one literal and hide the second
-// statement from explain's guard.
+// Note that this deliberately uses the *narrowest* reading of a literal,
+// which is the opposite of what Redact does. The two have opposite fail-safe
+// directions: Redact must never leave a byte of a literal in its output, so
+// it over-consumes; IsMultiStatement must never miss a statement separator,
+// so it under-consumes. Concretely:
+//
+//   - Backslash escapes are not honored. Treating "\'" as an escape would let
+//     `'a\'; DROP TABLE t; --'` read as one literal and hide the second
+//     statement.
+//   - A ";" counts as a separator when *any* dialect reading leaves it
+//     outside a literal, so the dollar-quote reading is checked both ways.
+//     Postgres-only: `$$'$$; DROP TABLE t` hides the ";" behind an
+//     unterminated ordinary literal unless dollar quotes are honored.
+//     Everywhere else: MySQL reads "$$" as identifier bytes, so
+//     `UPDATE t AS $$ SET id = 1; DROP TABLE t` hides the ";" behind an
+//     unterminated dollar body unless they are not. Neither reading is safe
+//     alone, and the statement reaches EXPLAIN inside the read-write
+//     transaction --allow-dml uses, where DDL implicit-commits past the
+//     rollback.
+//
+// The cost is that a single statement carrying a ";" inside a dollar-quoted
+// body is refused. Over-rejection is the affordable error here.
 func IsMultiStatement(sql string) bool {
-	s := blankStringLiterals(stripComments(sql))
-	if _, rest, found := strings.Cut(s, ";"); found {
+	s := stripComments(sql)
+	return hasStatementSeparator(blankLiterals(s, true)) ||
+		hasStatementSeparator(blankLiterals(s, false))
+}
+
+// hasStatementSeparator reports whether blanked SQL contains a ";" followed by
+// further non-whitespace content. Input must already have its literals blanked.
+func hasStatementSeparator(blanked string) bool {
+	if _, rest, found := strings.Cut(blanked, ";"); found {
 		return strings.TrimSpace(rest) != ""
 	}
 	return false

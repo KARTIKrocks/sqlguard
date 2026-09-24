@@ -72,16 +72,20 @@ the same version in lockstep.
   inside a dollar-quoted body is data, and treating it as a comment consumed
   the body's closing `$tag$` along with it — leaving the scanner unable to
   find the end of the literal and copying the body out as query structure.
-  `blankStringLiterals`, which `IsMultiStatement` is built on, deliberately
-  does **not** learn about dollar quotes. That check guards `explain` on
-  every dialect, and MySQL reads `$$` as ordinary identifier bytes, so
-  applying Postgres' semantics there would blank a real MySQL separator out
-  of existence — `UPDATE t AS $$ SET id = 1; DROP TABLE t` would reach
-  `EXPLAIN` with its `;` intact, inside the read-write transaction
-  `--allow-dml` uses, where a DDL statement implicit-commits past the
-  rollback. The cost is that a Postgres query with a `;` inside a
-  dollar-quoted body is refused by `explain`; hiding a separator is the one
-  error that check cannot afford.
+  `blankStringLiterals` blanks dollar-quoted bodies to match, so a keyword in
+  a value (`WHERE note = $$LIMIT 1$$`) no longer reads as a clause the
+  statement does not have.
+
+  `IsMultiStatement`, which guards `explain` against stacked statements, now
+  counts a `;` as a separator when **any** dialect reading leaves it outside
+  a literal, because neither reading is safe alone. Read as Postgres,
+  `SELECT $$'$$; DROP TABLE t` hides its `;` behind an unterminated ordinary
+  literal; read as anything else, `UPDATE t AS $$ SET id = 1; DROP TABLE t`
+  hides its `;` behind an unterminated dollar body. Either would have reached
+  `EXPLAIN` with the separator intact, inside the read-write transaction
+  `--allow-dml` uses, where DDL implicit-commits past the rollback. The cost
+  is that a single statement carrying a `;` inside a dollar-quoted body is
+  refused; over-rejection is the affordable error there.
 
   Dollar-quote delimiters follow Postgres' unquoted-identifier rules, so the
   tag scan accepts non-ASCII letters (`$é$…$é$` was previously unrecognised,

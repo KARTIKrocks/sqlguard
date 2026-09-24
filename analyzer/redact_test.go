@@ -228,6 +228,18 @@ func TestIsMultiStatement(t *testing.T) {
 			`UPDATE t AS $$ SET id = 1; DROP TABLE t`, true},
 		{"tagged dollar signs must not hide a mysql separator",
 			`UPDATE t SET a = 1 $x$ ; DROP TABLE t`, true},
+		// The mirror image: read as Postgres, the dollar body is a literal
+		// and the quote in it is data; read as anything else, that quote
+		// opens a literal that swallows the separator. Neither reading is
+		// safe alone, so a ";" outside a literal under *either* one counts.
+		{"quote in a dollar body must not hide a separator",
+			`SELECT $$'$$; DROP TABLE t`, true},
+		{"apostrophe in a dollar body must not hide a separator",
+			`SELECT $$it's$$; DROP TABLE t`, true},
+		{"quote in a tagged dollar body must not hide a separator",
+			`SELECT $x$'$x$; DROP TABLE t`, true},
+		{"dollar body with a quote is still one statement",
+			`SELECT $$it's$$`, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
