@@ -8,6 +8,7 @@ import (
 	"go/parser"
 	"go/token"
 	"go/types"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -90,6 +91,9 @@ func runScan(cmd *cobra.Command, args []string) error {
 	// to stderr only, so stdout stays pure JSON.
 	if formatFlag == "json" {
 		rep.Report(allResults)
+		if werr := jsonWriteErr(); werr != nil {
+			return werr
+		}
 		if len(allResults) > 0 {
 			return errIssuesFound
 		}
@@ -143,6 +147,28 @@ func trimPatternSuffixSep(path string, sep rune) string {
 	return trimmed
 }
 
+// checkedWriter remembers the first write error. reporter.Reporter cannot
+// return one — Report has no error result — so the CLI records it here and
+// reports it as a non-zero exit instead of writing a truncated document and
+// claiming success.
+type checkedWriter struct {
+	w   io.Writer
+	err error
+}
+
+func (c *checkedWriter) Write(p []byte) (int, error) {
+	n, err := c.w.Write(p)
+	if err != nil && c.err == nil {
+		c.err = err
+	}
+	return n, err
+}
+
+// jsonOut is the stdout wrapper the JSON reporter writes through, so runScan
+// and runExplain can see a failed write. Package-level because the reporter is
+// built in newReporter, which the two commands share.
+var jsonOut *checkedWriter
+
 // newReporter sends machine-readable output to stdout and human-readable
 // output to stderr. JSON is the program's product — `--format json > out.json`
 // and a pipe both have to receive it — while the console format is a
@@ -150,12 +176,22 @@ func trimPatternSuffixSep(path string, sep rune) string {
 func newReporter(format string) (reporter.Reporter, error) {
 	switch format {
 	case "json":
-		return reporter.NewJSONReporterTo(os.Stdout), nil
+		jsonOut = &checkedWriter{w: os.Stdout}
+		return reporter.NewJSONReporterTo(jsonOut), nil
 	case "console", "":
 		return reporter.NewConsoleReporter(), nil
 	default:
 		return nil, fmt.Errorf("unknown format %q: use 'console' or 'json'", format)
 	}
+}
+
+// jsonWriteErr reports a failed JSON write, so a truncated artifact on a full
+// disk fails the step instead of passing as green.
+func jsonWriteErr() error {
+	if jsonOut != nil && jsonOut.err != nil {
+		return fmt.Errorf("writing JSON output: %w", jsonOut.err)
+	}
+	return nil
 }
 
 // scanDir type-checks the target with golang.org/x/tools/go/packages so query

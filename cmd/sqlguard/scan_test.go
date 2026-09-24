@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -569,15 +571,24 @@ func captureScanStreams(t *testing.T, target, format string) (stdout, stderr str
 	rErr, wErr, _ := os.Pipe()
 	os.Stdout, os.Stderr = wOut, wErr
 
+	// Drain both pipes while the scan runs. Reading only after it returns
+	// deadlocks as soon as either stream exceeds the pipe buffer (64 KiB on
+	// Linux) — the scan blocks writing, the test blocks waiting for it, and
+	// the package hangs until the go test timeout.
+	var bufOut, bufErr bytes.Buffer
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); _, _ = bufOut.ReadFrom(rOut) }()
+	go func() { defer wg.Done(); _, _ = bufErr.ReadFrom(rErr) }()
+
 	err = runScan(&cobra.Command{}, []string{target})
 
 	wOut.Close()
 	wErr.Close()
+	wg.Wait()
+	rOut.Close()
+	rErr.Close()
 	os.Stdout, os.Stderr = oldOut, oldErr
-
-	var bufOut, bufErr bytes.Buffer
-	_, _ = bufOut.ReadFrom(rOut)
-	_, _ = bufErr.ReadFrom(rErr)
 
 	if err != nil && !errors.Is(err, errIssuesFound) {
 		t.Fatalf("scan failed unexpectedly: %v", err)
@@ -675,4 +686,91 @@ func f(db *sql.DB) {
 	if !strings.Contains(stderr, "issue(s) found") {
 		t.Errorf("summary line missing from stderr:\n%s", stderr)
 	}
+}
+
+// TestScan_JSONLargeOutputDoesNotDeadlock exercises more output than a pipe
+// buffer holds (64 KiB on Linux). With the capture helper reading only after
+// runScan returned, the scan blocked mid-write and the package hung until the
+// go test timeout rather than failing.
+func TestScan_JSONLargeOutputDoesNotDeadlock(t *testing.T) {
+	dir := t.TempDir()
+	var src strings.Builder
+	src.WriteString("package example\n\nimport \"database/sql\"\n\nfunc f(db *sql.DB) {\n")
+	for i := range 400 {
+		fmt.Fprintf(&src, "\tdb.Query(\"SELECT * FROM table_%d\")\n", i)
+	}
+	src.WriteString("}\n")
+	createTestFile(t, dir, "many.go", src.String())
+
+	noConfigFlag = true
+	t.Cleanup(func() { noConfigFlag = false })
+
+	stdout, _, err := captureScanStreams(t, dir, "json")
+
+	if !errors.Is(err, errIssuesFound) {
+		t.Fatalf("expected errIssuesFound, got %v", err)
+	}
+	if len(stdout) <= 64*1024 {
+		t.Fatalf("fixture no longer exceeds the pipe buffer (%d bytes); "+
+			"the deadlock this test guards would not reproduce", len(stdout))
+	}
+	var got []map[string]any
+	if uerr := json.Unmarshal([]byte(stdout), &got); uerr != nil {
+		t.Fatalf("large output is not valid JSON: %v", uerr)
+	}
+	if len(got) < 400 {
+		t.Errorf("expected at least 400 findings, got %d", len(got))
+	}
+}
+
+// TestCheckedWriter_RecordsFirstError pins the write-failure path. stdout is
+// the product now, so a partial write must fail the run rather than leave a
+// truncated document behind a zero exit.
+func TestCheckedWriter_RecordsFirstError(t *testing.T) {
+	sentinel := errors.New("disk full")
+	cw := &checkedWriter{w: &failingWriter{after: 4, err: sentinel}}
+
+	_, _ = cw.Write([]byte("ok"))
+	if cw.err != nil {
+		t.Fatalf("no error expected before the limit, got %v", cw.err)
+	}
+	_, _ = cw.Write([]byte("more"))
+	if !errors.Is(cw.err, sentinel) {
+		t.Fatalf("expected the write error to be recorded, got %v", cw.err)
+	}
+
+	second := errors.New("second")
+	_, _ = cw.Write([]byte("x"))
+	cw.w = &failingWriter{after: 0, err: second}
+	_, _ = cw.Write([]byte("y"))
+	if !errors.Is(cw.err, sentinel) {
+		t.Errorf("the first error should be kept, got %v", cw.err)
+	}
+
+	jsonOut = cw
+	t.Cleanup(func() { jsonOut = nil })
+	if err := jsonWriteErr(); !errors.Is(err, sentinel) {
+		t.Errorf("jsonWriteErr should surface the recorded error, got %v", err)
+	}
+
+	jsonOut = nil
+	if err := jsonWriteErr(); err != nil {
+		t.Errorf("no reporter means no error, got %v", err)
+	}
+}
+
+// failingWriter accepts `after` bytes, then fails every write. The pointer
+// receiver matters: the byte count has to accumulate across calls.
+type failingWriter struct {
+	written int
+	after   int
+	err     error
+}
+
+func (f *failingWriter) Write(p []byte) (int, error) {
+	if f.written+len(p) > f.after {
+		return 0, f.err
+	}
+	f.written += len(p)
+	return len(p), nil
 }
