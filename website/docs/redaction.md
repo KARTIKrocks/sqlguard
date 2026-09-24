@@ -56,6 +56,18 @@ trade: losing structure costs readability, and under-redacting leaks a value.
 SQL with no backslash in it is unambiguous, scans identically under both
 readings, and is unaffected.
 
+One consequence is worth knowing about, because it reaches past readability:
+an over-redacted query has a **different fingerprint** from the same query
+with an unambiguous value. Above, `p = 'C:\'` folds to
+`… WHERE p = ?` while `p = 'plain'` folds to `… WHERE p = ? AND id = ?`. So a
+query whose values only _sometimes_ end in a backslash — Windows paths,
+`LIKE … ESCAPE` patterns, regexes — groups under two fingerprints instead of
+one. That splits [N+1](n-plus-one) counts across both (a run that would trip
+a threshold of 20 may land as 12 and 8 and trip neither) and lets the
+[de-duplicator](noise-control) emit the same finding once per group. Bind
+parameters avoid it entirely, and are the better answer for those values
+anyway.
+
 ### One dialect gap to know about
 
 A `"double-quoted"` run is treated as an **identifier** and preserved. That is

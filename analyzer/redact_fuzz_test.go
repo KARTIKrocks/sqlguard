@@ -27,6 +27,10 @@ func FuzzRedact(f *testing.F) {
 		`SELECT * FROM t WHERE a = 'x' AND b = 0xFF`,
 		`SELECT $$a$$, $t$b$t$ FROM t WHERE c = $1`,
 		`SELECT 'a\' /* ; */ AND b = 'c'`,
+		`SELECT $$a -- b$$ AND c = 'd'`,
+		`SELECT $t$a /* b$t$ AND c = 'd'`,
+		`SELECT $$a'b$$ -- c`,
+		`SELECT a -- $$ b`,
 		`SELECT "id", ` + "`n`" + ` FROM t WHERE s = 'O''B'`,
 	}
 	for _, s := range seeds {

@@ -479,7 +479,8 @@ func detectKind(sanitized string) StmtKind {
 
 // stripComments removes -- line comments and /* */ block comments, replacing
 // each with a single space so token boundaries are preserved. It does not
-// remove comment markers that appear inside string literals.
+// remove comment markers that appear inside string literals, including
+// Postgres dollar-quoted ones.
 func stripComments(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))
@@ -487,6 +488,20 @@ func stripComments(s string) string {
 		switch c := s[i]; {
 		case c == '\'' || c == '"':
 			i = copyStringLiteral(&b, s, i)
+		case c == '$':
+			// A dollar-quoted body is opaque: a -- or /* inside it is data,
+			// not a comment. Eating one would consume the body's closing
+			// $tag$ delimiter, leaving Redact's scanner unable to find the
+			// end of the literal — and therefore copying the body out as if
+			// it were query structure.
+			j, ok := scanDollarQuoted(s, i)
+			if !ok {
+				b.WriteByte(c)
+				i++
+				continue
+			}
+			b.WriteString(s[i:j])
+			i = j
 		case c == '-' && i+1 < len(s) && s[i+1] == '-':
 			i = skipLineComment(s, i)
 			b.WriteByte(' ')

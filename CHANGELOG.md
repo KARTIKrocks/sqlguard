@@ -31,7 +31,8 @@ the same version in lockstep.
   Docusaurus bumps do not bury the Go module PRs.
 - `Analyzer.PrepareQuery` now redacts once instead of twice (the fingerprint
   is folded from the already-redacted text), which offsets most of the cost
-  of the two-reading literal scan above. `analyzer.Redact` costs roughly
+  of the two-reading literal scan under **Security** below. `analyzer.Redact`
+  costs roughly
   700 ns for a parameterized query and 1.3 µs for one full of literals,
   against a ~70 µs `Analyze`; a query with no backslash in it skips the
   second scan entirely. Benchmarks live in `analyzer/redact_bench_test.go`,
@@ -66,6 +67,16 @@ the same version in lockstep.
   the hex payload out as if it were an identifier. Both are now redacted.
   `$1`/`$2` bind placeholders and an unterminated `$…$` run are still left
   alone.
+
+  `stripComments` is dollar-quote aware for the same reason: a `--` or `/*`
+  inside a dollar-quoted body is data, and treating it as a comment consumed
+  the body's closing `$tag$` along with it — leaving the scanner unable to
+  find the end of the literal and copying the body out as query structure.
+
+  Note that where redaction is forced to over-redact, the query's
+  **fingerprint changes too**, so a query whose values only sometimes contain
+  a backslash groups under two fingerprints — splitting N+1 counts and
+  de-duplication across both. Bind parameters avoid it; see the docs.
 
   A double-quoted run remains an *identifier* and is preserved, which is
   correct for ANSI/PostgreSQL and for MySQL under `ANSI_QUOTES` but not for
