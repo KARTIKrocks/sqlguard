@@ -64,24 +64,30 @@ func runExplain(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Same split as scan: JSON is the product and goes to stdout, the console
+	// rendering is a diagnostic and stays on stderr. See newReporter.
 	var rep reporter.Reporter
 	switch explainFormat {
 	case "json":
-		rep = reporter.NewJSONReporter()
+		rep = reporter.NewJSONReporterTo(os.Stdout)
 	default:
 		rep = reporter.NewConsoleReporter()
 	}
 
+	if explainFormat == "json" {
+		rep.Report(result.Issues)
+		if len(result.Issues) > 0 {
+			return errIssuesFound
+		}
+		return nil
+	}
+
 	if len(result.Issues) > 0 {
 		rep.Report(result.Issues)
-		if explainFormat != "json" {
-			fmt.Fprintf(os.Stderr, "\n%d issue(s) found in query plan\n", len(result.Issues))
-		}
+		fmt.Fprintf(os.Stderr, "\n%d issue(s) found in query plan\n", len(result.Issues))
 		return errIssuesFound
 	}
 
-	if explainFormat != "json" {
-		fmt.Fprintln(os.Stderr, "No issues found in query plan")
-	}
+	fmt.Fprintln(os.Stderr, "No issues found in query plan")
 	return nil
 }

@@ -39,6 +39,10 @@ The whole command runs under a 30-second timeout, including the initial
 connectivity check. Exit code is **1** when the plan has issues, **0**
 when clean.
 
+As with [`scan`](scan#usage), the console rendering goes to stderr and
+`--format json` goes to stdout, always as an array. _Changed in 0.3._ In 0.2
+JSON went to stderr, so redirecting it produced an empty file.
+
 ```text
 [SQLGUARD WARNING] seq-scan
   Query: SELECT id, total FROM orders WHERE customer_id = 42

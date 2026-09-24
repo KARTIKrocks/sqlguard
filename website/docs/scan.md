@@ -35,9 +35,18 @@ so the form used throughout these docs had to be written as `sqlguard scan .`.
 | `--config <path>` | auto-discover | Load a specific [`.sqlguard.yml`](configuration). |
 | `--no-config` | — | Ignore any config file; run every rule at its default. |
 
-Exit code is **1** when any issue is found and **0** when clean. Findings
-go to stderr, so `2>` redirection captures them without disturbing
-whatever your CI step prints to stdout.
+Exit code is **1** when any issue is found and **0** when clean.
+
+Output is split by audience. The **console** format writes findings and the
+summary line to **stderr**, so `2>` captures the human-readable report without
+disturbing whatever your CI step prints to stdout. The **JSON** format writes
+to **stdout**, so `--format json > findings.json` and pipes into `jq` both
+work, and it always emits an array — `[]` on a clean run — so a consumer never
+has to parse an empty file.
+
+_Changed in 0.3._ In 0.2 JSON also went to stderr, which made
+`--format json > findings.json` produce an empty file, and a clean run printed
+nothing at all rather than `[]`.
 
 ```text
 [SQLGUARD CRITICAL] delete-without-where
@@ -114,6 +123,18 @@ Or inside the SQL itself, which also works at runtime. Details in
     go-version: "1.27"
 - run: go install github.com/KARTIKrocks/sqlguard/cmd/sqlguard@latest
 - run: sqlguard scan ./...
+```
+
+To keep the findings as a build artifact, redirect the JSON and let the exit
+code still fail the step:
+
+```yaml
+- run: sqlguard scan --format json ./... > sqlguard.json
+- uses: actions/upload-artifact@v4
+  if: always()
+  with:
+    name: sqlguard-findings
+    path: sqlguard.json
 ```
 
 The step fails on any finding. To gate only on the serious ones, lower the

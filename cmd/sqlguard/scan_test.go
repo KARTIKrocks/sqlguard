@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -552,5 +553,126 @@ func g(db *sql.DB) {
 	}
 	if strings.Contains(out, "delete-without-where") {
 		t.Errorf("scanned the sibling directory instead of the one named, got:\n%s", out)
+	}
+}
+
+// captureScanStreams runs a scan capturing stdout and stderr separately, which
+// is what the stream split has to be asserted on.
+func captureScanStreams(t *testing.T, target, format string) (stdout, stderr string, err error) {
+	t.Helper()
+
+	formatFlag = format
+	t.Cleanup(func() { formatFlag = "console" })
+
+	oldOut, oldErr := os.Stdout, os.Stderr
+	rOut, wOut, _ := os.Pipe()
+	rErr, wErr, _ := os.Pipe()
+	os.Stdout, os.Stderr = wOut, wErr
+
+	err = runScan(&cobra.Command{}, []string{target})
+
+	wOut.Close()
+	wErr.Close()
+	os.Stdout, os.Stderr = oldOut, oldErr
+
+	var bufOut, bufErr bytes.Buffer
+	_, _ = bufOut.ReadFrom(rOut)
+	_, _ = bufErr.ReadFrom(rErr)
+
+	if err != nil && !errors.Is(err, errIssuesFound) {
+		t.Fatalf("scan failed unexpectedly: %v", err)
+	}
+	return bufOut.String(), bufErr.String(), err
+}
+
+// TestScan_JSONGoesToStdout pins the stream split. JSON was written to stderr,
+// so `sqlguard scan --format json > out.json` — the only reason a
+// machine-readable format exists — produced an empty file.
+func TestScan_JSONGoesToStdout(t *testing.T) {
+	dir := t.TempDir()
+	createTestFile(t, dir, "bad.go", `package example
+import "database/sql"
+func f(db *sql.DB) {
+	db.Query("SELECT * FROM users")
+}
+`)
+	noConfigFlag = true
+	t.Cleanup(func() { noConfigFlag = false })
+
+	stdout, stderr, err := captureScanStreams(t, dir, "json")
+
+	if !errors.Is(err, errIssuesFound) {
+		t.Fatalf("expected errIssuesFound, got %v", err)
+	}
+	if strings.Contains(stderr, "select-star") {
+		t.Errorf("JSON findings leaked onto stderr:\n%s", stderr)
+	}
+	var got []map[string]any
+	if uerr := json.Unmarshal([]byte(stdout), &got); uerr != nil {
+		t.Fatalf("stdout is not valid JSON (%v):\n%s", uerr, stdout)
+	}
+	if len(got) == 0 {
+		t.Fatalf("expected findings in the JSON array, got %s", stdout)
+	}
+	if got[0]["rule"] != "select-star" {
+		t.Errorf("unexpected first rule %v in:\n%s", got[0]["rule"], stdout)
+	}
+}
+
+// TestScan_JSONEmptyArrayWhenClean guards the other half of the redirect story:
+// a clean run used to emit nothing at all, handing a consumer an empty file
+// rather than a parseable empty array.
+func TestScan_JSONEmptyArrayWhenClean(t *testing.T) {
+	dir := t.TempDir()
+	createTestFile(t, dir, "clean.go", `package example
+import "database/sql"
+func f(db *sql.DB) {
+	db.Query("SELECT id, name FROM users WHERE id = ? LIMIT 10", 1)
+}
+`)
+	noConfigFlag = true
+	t.Cleanup(func() { noConfigFlag = false })
+
+	stdout, _, err := captureScanStreams(t, dir, "json")
+
+	if err != nil {
+		t.Fatalf("expected exit 0 on a clean tree, got %v", err)
+	}
+	var got []map[string]any
+	if uerr := json.Unmarshal([]byte(stdout), &got); uerr != nil {
+		t.Fatalf("clean run must still emit a parseable array, got %q (%v)", stdout, uerr)
+	}
+	if len(got) != 0 {
+		t.Errorf("expected an empty array, got %s", stdout)
+	}
+}
+
+// TestScan_ConsoleStaysOnStderr is the other side of the split: the console
+// rendering shares stderr with the progress and summary lines, so a CI step
+// redirecting stdout does not swallow the human-readable report.
+func TestScan_ConsoleStaysOnStderr(t *testing.T) {
+	dir := t.TempDir()
+	createTestFile(t, dir, "bad.go", `package example
+import "database/sql"
+func f(db *sql.DB) {
+	db.Exec("DELETE FROM sessions")
+}
+`)
+	noConfigFlag = true
+	t.Cleanup(func() { noConfigFlag = false })
+
+	stdout, stderr, err := captureScanStreams(t, dir, "console")
+
+	if !errors.Is(err, errIssuesFound) {
+		t.Fatalf("expected errIssuesFound, got %v", err)
+	}
+	if stdout != "" {
+		t.Errorf("console format wrote to stdout:\n%s", stdout)
+	}
+	if !strings.Contains(stderr, "delete-without-where") {
+		t.Errorf("console findings missing from stderr:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, "issue(s) found") {
+		t.Errorf("summary line missing from stderr:\n%s", stderr)
 	}
 }

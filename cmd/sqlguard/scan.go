@@ -85,17 +85,24 @@ func runScan(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("scan failed: %w", err)
 	}
 
+	// JSON reports unconditionally: a consumer that redirects stdout must get
+	// a parseable array on a clean run too, not an empty file. The counts go
+	// to stderr only, so stdout stays pure JSON.
+	if formatFlag == "json" {
+		rep.Report(allResults)
+		if len(allResults) > 0 {
+			return errIssuesFound
+		}
+		return nil
+	}
+
 	if len(allResults) > 0 {
 		rep.Report(allResults)
-		if formatFlag != "json" {
-			_, _ = fmt.Fprintf(os.Stderr, "\n%d issue(s) found (%d file(s) scanned)\n", len(allResults), totalFiles)
-		}
+		_, _ = fmt.Fprintf(os.Stderr, "\n%d issue(s) found (%d file(s) scanned)\n", len(allResults), totalFiles)
 		return errIssuesFound
 	}
 
-	if formatFlag != "json" {
-		_, _ = fmt.Fprintf(os.Stderr, "No issues found (%d file(s) scanned)\n", totalFiles)
-	}
+	_, _ = fmt.Fprintf(os.Stderr, "No issues found (%d file(s) scanned)\n", totalFiles)
 	return nil
 }
 
@@ -136,10 +143,14 @@ func trimPatternSuffixSep(path string, sep rune) string {
 	return trimmed
 }
 
+// newReporter sends machine-readable output to stdout and human-readable
+// output to stderr. JSON is the program's product — `--format json > out.json`
+// and a pipe both have to receive it — while the console format is a
+// diagnostic that shares stderr with the progress and summary lines.
 func newReporter(format string) (reporter.Reporter, error) {
 	switch format {
 	case "json":
-		return reporter.NewJSONReporter(), nil
+		return reporter.NewJSONReporterTo(os.Stdout), nil
 	case "console", "":
 		return reporter.NewConsoleReporter(), nil
 	default:
