@@ -580,9 +580,8 @@ func captureScanStreams(t *testing.T, target, format string) (stdout, stderr str
 	// the package hangs until the go test timeout.
 	var bufOut, bufErr bytes.Buffer
 	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() { defer wg.Done(); _, _ = bufOut.ReadFrom(rOut) }()
-	go func() { defer wg.Done(); _, _ = bufErr.ReadFrom(rErr) }()
+	wg.Go(func() { _, _ = bufOut.ReadFrom(rOut) })
+	wg.Go(func() { _, _ = bufErr.ReadFrom(rErr) })
 
 	err = runScan(&cobra.Command{}, []string{target})
 
@@ -922,9 +921,8 @@ func TestNewReporter_JSONTargetsStdout(t *testing.T) {
 
 	var bufOut, bufErr bytes.Buffer
 	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() { defer wg.Done(); _, _ = bufOut.ReadFrom(rOut) }()
-	go func() { defer wg.Done(); _, _ = bufErr.ReadFrom(rErr) }()
+	wg.Go(func() { _, _ = bufOut.ReadFrom(rOut) })
+	wg.Go(func() { _, _ = bufErr.ReadFrom(rErr) })
 
 	jr.Report([]analyzer.Result{{RuleName: "select-star"}})
 
@@ -970,7 +968,7 @@ func TestNewReporter_EachCallGetsItsOwnWriteError(t *testing.T) {
 
 	var sink bytes.Buffer
 	var wg sync.WaitGroup
-	wg.Go(func() { ; _, _ = sink.ReadFrom(rOK) })
+	wg.Go(func() { _, _ = sink.ReadFrom(rOK) })
 
 	repBroken.Report([]analyzer.Result{{RuleName: "select-star"}})
 	repOK.Report([]analyzer.Result{{RuleName: "select-star"}})
