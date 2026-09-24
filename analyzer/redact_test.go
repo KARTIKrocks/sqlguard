@@ -24,6 +24,31 @@ func TestRedact(t *testing.T) {
 			"SELECT `from` FROM t WHERE n = ?"},
 		{"escaped quote in literal", `SELECT * FROM t WHERE s = 'O''Brien'`,
 			`SELECT * FROM t WHERE s = ?`},
+		{"backslash-escaped quote", `SELECT * FROM t WHERE s = 'O\'Brien'`,
+			`SELECT * FROM t WHERE s = ?`},
+		{"even backslashes end the literal", `SELECT * FROM t WHERE a = 'x\\' AND b = 'y'`,
+			`SELECT * FROM t WHERE a = ? AND b = ?`},
+		{"dollar-quoted string", `SELECT * FROM t WHERE body = $$a 'b' c$$`,
+			`SELECT * FROM t WHERE body = ?`},
+		{"tagged dollar-quoted string", `SELECT * FROM t WHERE body = $fn$x$fn$`,
+			`SELECT * FROM t WHERE body = ?`},
+		{"hex literal", `SELECT * FROM t WHERE h = 0xDEADBEEF`,
+			`SELECT * FROM t WHERE h = ?`},
+		{"binary literal", `SELECT * FROM t WHERE b = 0b1011`,
+			`SELECT * FROM t WHERE b = ?`},
+		{"lone dollars are not a quote", `SELECT x$$y FROM t WHERE id = 3`,
+			`SELECT x$$y FROM t WHERE id = ?`},
+		// Postgres allows "$" inside an identifier after its first character,
+		// so these dollars continue the name rather than opening a literal.
+		{"dollars inside an identifier are not a quote",
+			`SELECT foo$tag$value$tag$ FROM t WHERE id = 3`,
+			`SELECT foo$tag$value$tag$ FROM t WHERE id = ?`},
+		{"real comments still stripped around a dollar body",
+			`SELECT $$body$$ /* note */ FROM t`,
+			`SELECT ?   FROM t`},
+		{"dollar signs in a comment do not open a quote",
+			"SELECT a -- $$ x\nFROM t WHERE id = 1",
+			"SELECT a  \nFROM t WHERE id = ?"},
 		{"comment stripped", "SELECT a -- secret 'tok'\nFROM t WHERE id = 9",
 			"SELECT a  \nFROM t WHERE id = ?"},
 		{"semicolon inside literal not structural", `SELECT * FROM t WHERE s = 'a;b'`,
@@ -47,6 +72,91 @@ func TestRedactNoPII(t *testing.T) {
 		if contains(got, p) {
 			t.Errorf("Redact leaked %q: %q", p, got)
 		}
+	}
+}
+
+// TestRedactNoLeakAcrossDialectAmbiguity pins the security invariant from
+// SECURITY.md: no literal byte survives Redact (and therefore Fingerprint),
+// whichever dialect reading of a backslash escape is correct. Each of these
+// desynchronised the old single-pass lexer, which closed a literal at the
+// wrong quote and then emitted the following literal's contents verbatim.
+func TestRedactNoLeakAcrossDialectAmbiguity(t *testing.T) {
+	cases := []struct {
+		name    string
+		in      string
+		secrets []string
+	}{
+		{"mysql backslash escape",
+			`SELECT * FROM u WHERE name = 'O\'Brien' AND ssn = '123-45-6789'`,
+			[]string{"Brien", "123-45-6789"}},
+		{"postgres E-string escape",
+			`SELECT * FROM u WHERE a = E'it\'s' AND token = 'sk-live-abcdef'`,
+			[]string{"sk-live-abcdef"}},
+		{"trailing backslash under standard_conforming_strings",
+			`SELECT * FROM t WHERE path = 'C:\' AND secret = 'hunter2'`,
+			[]string{"hunter2"}},
+		{"escape ambiguity across a comment",
+			"SELECT * FROM t WHERE s = 'a\\' /* x */ AND tok = 'ghp_deadbeef'",
+			[]string{"ghp_deadbeef"}},
+		{"dollar-quoted body",
+			`SELECT * FROM u WHERE bio = $$super secret value$$`,
+			[]string{"super secret value"}},
+		{"tagged dollar-quoted body",
+			`SELECT * FROM u WHERE bio = $tag$another secret$tag$`,
+			[]string{"another secret"}},
+		{"quote inside dollar-quoted body",
+			`SELECT $$it's 'nested'$$, email FROM u WHERE e = 'a@b.c'`,
+			[]string{"nested", "a@b.c"}},
+		// A comment marker inside a dollar-quoted body is data. If
+		// stripComments treated it as a comment it would eat the closing
+		// $tag$ with it, stranding the body outside any literal span and
+		// copying it straight out — see stripComments in fallback.go.
+		{"line-comment marker inside dollar-quoted body",
+			`SELECT * FROM t WHERE a = $$call 555-1234 -- ok$$ AND b = 1`,
+			[]string{"call", "555-1234"}},
+		{"line-comment marker inside tagged dollar-quoted body",
+			`SELECT * FROM t WHERE a = $tag$SECRET -- x$tag$`,
+			[]string{"SECRET"}},
+		{"block-comment marker inside dollar-quoted body",
+			`SELECT * FROM t WHERE a = $$SECRET /* x$$ AND b = 2`,
+			[]string{"SECRET"}},
+		{"trailing comment after a dollar body holding a quote",
+			`SELECT $$a'b$$ -- alice@example.com`,
+			[]string{"alice@example.com"}},
+		// Postgres dollar-quote tags follow unquoted-identifier rules, which
+		// admit non-ASCII letters, so the delimiter scan cannot be ASCII-only.
+		{"non-ascii dollar-quote tag",
+			`SELECT * FROM u WHERE bio = $é$secret$é$ AND id = 1`,
+			[]string{"secret"}},
+		{"multibyte dollar-quote tag",
+			`SELECT * FROM u WHERE bio = $日本$secret$日本$`,
+			[]string{"secret"}},
+		// A truncated query leaves the body unterminated; it is still body.
+		{"unterminated dollar-quoted body",
+			`SELECT * FROM u WHERE bio = $$dangling secret`,
+			[]string{"dangling secret"}},
+		{"unterminated tagged dollar-quoted body",
+			`SELECT * FROM u WHERE bio = $tag$dangling secret`,
+			[]string{"dangling secret"}},
+		{"hex payload",
+			`SELECT * FROM u WHERE x = 0x4142414241424142`,
+			[]string{"4142414241424142"}},
+		{"unterminated literal",
+			`SELECT * FROM u WHERE s = 'dangling secret`,
+			[]string{"dangling secret"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, fp := Redact(c.in), Fingerprint(c.in)
+			for _, s := range c.secrets {
+				if contains(got, s) {
+					t.Errorf("Redact leaked %q\n  in:  %s\n  out: %s", s, c.in, got)
+				}
+				if contains(fp, s) {
+					t.Errorf("Fingerprint leaked %q\n  in: %s\n  fp: %s", s, c.in, fp)
+				}
+			}
+		})
 	}
 }
 
@@ -95,6 +205,41 @@ func TestIsMultiStatement(t *testing.T) {
 		{"semicolon in string literal", `SELECT * FROM t WHERE s = 'a; DROP'`, false},
 		{"comment hides stacking attempt", "SELECT 1 -- ;\nfrom t", false},
 		{"real stack after string", `SELECT 'a;b'; DELETE FROM t`, true},
+		// IsMultiStatement takes the narrowest reading of a literal, the
+		// opposite of Redact's: if "\'" closes the literal on the target
+		// server, the tail really is a second statement, so it must be
+		// refused. Over-rejecting a one-statement query is the safe error.
+		{"backslash escape must not hide a stacked statement",
+			`SELECT 'a\'; DROP TABLE users; --'`, true},
+		{"backslash escape must not hide a stacked DELETE",
+			`SELECT * FROM t WHERE s = 'x\'; DELETE FROM t; --'`, true},
+		// Dollar quotes are Postgres-only syntax, but this check guards
+		// explain on every dialect, and MySQL reads "$$" as ordinary
+		// identifier bytes. Blanking a dollar body here would erase a real
+		// MySQL separator: with --allow-dml the EXPLAIN runs in a read-write
+		// transaction, and a smuggled DDL statement implicit-commits, so
+		// rollback would not undo it. These stay refused on purpose — a
+		// Postgres-only query occasionally rejected is the affordable error.
+		{"semicolon in dollar-quoted body", `SELECT $$a ; b$$`, true},
+		{"comment marker and semicolon in dollar-quoted body",
+			`SELECT $$-- ; note$$`, true},
+		{"real stack after a dollar body", `SELECT $$x$$ ; DROP TABLE t`, true},
+		{"dollar signs must not hide a mysql separator",
+			`UPDATE t AS $$ SET id = 1; DROP TABLE t`, true},
+		{"tagged dollar signs must not hide a mysql separator",
+			`UPDATE t SET a = 1 $x$ ; DROP TABLE t`, true},
+		// The mirror image: read as Postgres, the dollar body is a literal
+		// and the quote in it is data; read as anything else, that quote
+		// opens a literal that swallows the separator. Neither reading is
+		// safe alone, so a ";" outside a literal under *either* one counts.
+		{"quote in a dollar body must not hide a separator",
+			`SELECT $$'$$; DROP TABLE t`, true},
+		{"apostrophe in a dollar body must not hide a separator",
+			`SELECT $$it's$$; DROP TABLE t`, true},
+		{"quote in a tagged dollar body must not hide a separator",
+			`SELECT $x$'$x$; DROP TABLE t`, true},
+		{"dollar body with a quote is still one statement",
+			`SELECT $$it's$$`, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -112,4 +257,49 @@ func contains(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+// TestIsMultiStatementNeedsBothReadings pins the rationale in
+// IsMultiStatement's doc comment: each reading of "$$" is blind to a
+// different payload, so neither can be dropped. Without this, "simplifying"
+// the check back to one reading looks safe — the existing table would still
+// pass for whichever payload that reading happens to catch.
+func TestIsMultiStatementNeedsBothReadings(t *testing.T) {
+	cases := []struct {
+		name string
+		sql  string
+		// which reading leaves the ";" visible; the other one hides it
+		seenWithDollarQuotes bool
+	}{
+		// "$$" is identifier bytes on MySQL, but reading it as a dollar
+		// delimiter opens an unterminated body that swallows the separator.
+		{"caught only without dollar quotes",
+			`UPDATE t AS $$ SET id = 1; DROP TABLE t`, false},
+		// The apostrophe is data inside a Postgres dollar body, but reading
+		// "$$" as ordinary bytes opens an unterminated literal instead.
+		{"caught only with dollar quotes",
+			`SELECT $$'$$; DROP TABLE t`, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s := stripComments(c.sql)
+			withDollar := hasStatementSeparator(blankLiterals(s, true))
+			without := hasStatementSeparator(blankLiterals(s, false))
+
+			if withDollar != c.seenWithDollarQuotes {
+				t.Errorf("dollar-quote reading: separator visible = %v, want %v",
+					withDollar, c.seenWithDollarQuotes)
+			}
+			if without != !c.seenWithDollarQuotes {
+				t.Errorf("ordinary-quote reading: separator visible = %v, want %v",
+					without, !c.seenWithDollarQuotes)
+			}
+			if withDollar == without {
+				t.Fatal("both readings agree; this case no longer proves both are needed")
+			}
+			if !IsMultiStatement(c.sql) {
+				t.Error("IsMultiStatement must refuse this input")
+			}
+		})
+	}
 }

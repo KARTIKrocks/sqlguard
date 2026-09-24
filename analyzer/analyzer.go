@@ -80,11 +80,15 @@ func (a *Analyzer) WithRawQuery() *Analyzer {
 // consistent. display is redacted unless the Analyzer was built
 // WithRawQuery; fingerprint is always the PII-free identity.
 func (a *Analyzer) PrepareQuery(raw string) (display, fingerprint string) {
-	fingerprint = Fingerprint(raw)
+	// One redaction pass feeds both returns: the fingerprint is the redacted
+	// text folded further, so computing it via Fingerprint(raw) would redact
+	// the same query a second time on a per-query path.
+	redacted := Redact(raw)
+	fingerprint = foldRedacted(redacted)
 	if a.rawQuery {
 		return raw, fingerprint
 	}
-	return Redact(raw), fingerprint
+	return redacted, fingerprint
 }
 
 // Default creates an Analyzer with all registered built-in rules and the

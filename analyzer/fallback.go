@@ -479,7 +479,8 @@ func detectKind(sanitized string) StmtKind {
 
 // stripComments removes -- line comments and /* */ block comments, replacing
 // each with a single space so token boundaries are preserved. It does not
-// remove comment markers that appear inside string literals.
+// remove comment markers that appear inside string literals, including
+// Postgres dollar-quoted ones.
 func stripComments(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))
@@ -487,6 +488,20 @@ func stripComments(s string) string {
 		switch c := s[i]; {
 		case c == '\'' || c == '"':
 			i = copyStringLiteral(&b, s, i)
+		case c == '$':
+			// A dollar-quoted body is opaque: a -- or /* inside it is data,
+			// not a comment. Eating one would consume the body's closing
+			// $tag$ delimiter, leaving Redact's scanner unable to find the
+			// end of the literal — and therefore copying the body out as if
+			// it were query structure.
+			j, _, ok := scanDollarQuoted(s, i)
+			if !ok {
+				b.WriteByte(c)
+				i++
+				continue
+			}
+			b.WriteString(s[i:j])
+			i = j
 		case c == '-' && i+1 < len(s) && s[i+1] == '-':
 			i = skipLineComment(s, i)
 			b.WriteByte(' ')
@@ -546,11 +561,34 @@ func skipBlockComment(s string, i int) int {
 // blankStringLiterals replaces the contents of every string literal with an
 // empty literal, so SQL keywords that appear inside string values cannot be
 // mistaken for clauses. Input must already be comment-free.
-func blankStringLiterals(s string) string {
+//
+// Postgres dollar-quoted bodies are blanked too. stripComments has to copy
+// such a body verbatim (a comment marker inside one is data), so without this
+// the body's text reaches the clause regexes — "WHERE note = $$LIMIT 1$$"
+// would read as having a LIMIT clause — and a stray quote in the body would
+// open a literal that runs to the end of the input.
+//
+// Callers that must not let a literal hide a statement separator use
+// blankLiterals directly with both dialect readings; see IsMultiStatement.
+func blankStringLiterals(s string) string { return blankLiterals(s, true) }
+
+// blankLiterals is blankStringLiterals with the dollar-quote reading made
+// explicit. dollarQuotes selects whether "$tag$...$tag$" is a literal
+// (Postgres) or ordinary identifier bytes (MySQL and everything else).
+func blankLiterals(s string, dollarQuotes bool) string {
 	var b strings.Builder
 	b.Grow(len(s))
 	for i := 0; i < len(s); {
 		c := s[i]
+		if dollarQuotes && c == '$' {
+			if j, tagLen, ok := scanDollarQuoted(s, i); ok {
+				tag := s[i : i+tagLen]
+				b.WriteString(tag)
+				b.WriteString(tag)
+				i = j
+				continue
+			}
+		}
 		if c == '\'' || c == '"' {
 			q := c
 			b.WriteByte(q)

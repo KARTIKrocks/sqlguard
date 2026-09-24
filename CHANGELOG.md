@@ -29,6 +29,41 @@ the same version in lockstep.
 - `goimports` pinned to v0.50.0 (was v0.45.0).
 - Dependabot also tracks the docs site's npm dependencies, grouped so
   Docusaurus bumps do not bury the Go module PRs.
+- `Analyzer.PrepareQuery` redacts once instead of twice (the fingerprint is
+  folded from the already-redacted text), which offsets most of the cost of
+  the wider literal scan under **Security** below.
+
+### Security
+
+- **Redaction leaked literal values into `Result.Query` and
+  `Result.Fingerprint`**, breaking the `SECURITY.md` invariant that no
+  `Result` carries a raw literal out of the process. Three cases: a literal
+  containing `\'` — the default escape on MySQL and in PostgreSQL `E'…'`
+  strings — closed at the wrong quote and spilled the *following* literal's
+  contents out as query structure; PostgreSQL dollar-quoted strings
+  (`$$…$$`, `$tag$…$tag$`, including non-ASCII tags) passed through
+  untouched; and `0x4142` redacted only its leading `0`. All three are now
+  redacted, as are binary (`0b…`) literals. Audit any log sink or metrics
+  label that already captured findings from such queries.
+- **Redaction now over-redacts where the dialect is ambiguous.** Dialects
+  disagree about whether `\'` closes a literal, so `Redact` covers both
+  readings and blanks the union: structure may be lost around a backslash,
+  but no literal survives either reading. **This changes the fingerprint
+  too** — a query whose values only sometimes contain a backslash now groups
+  under two fingerprints, splitting N+1 counts and de-duplication across
+  both. Bind parameters avoid it.
+- **`explain` refuses more input.** A `;` now counts as a statement
+  separator whenever any dialect reading leaves it outside a literal, so a
+  single statement carrying a `;` inside a dollar-quoted body is rejected.
+  Neither reading of `$$` was safe alone: one hid a separator behind an
+  unterminated ordinary literal, the other behind an unterminated dollar
+  body, and either would have reached `EXPLAIN` with the separator intact
+  inside the read-write transaction `--allow-dml` uses.
+- **Known gap**: a double-quoted run is still treated as an identifier and
+  preserved. That is correct for ANSI/PostgreSQL and for MySQL under
+  `ANSI_QUOTES`, but MySQL's default `sql_mode` reads `"…"` as a string
+  literal, so those values are not redacted. Use `'…'` or bind parameters on
+  MySQL. Tracked in #62.
 
 ### Fixed
 

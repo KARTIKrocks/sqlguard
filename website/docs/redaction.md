@@ -18,17 +18,71 @@ choice — see the repository's `SECURITY.md`.
 `analyzer.Redact` is a zero-dependency lexical pass over the SQL:
 
 - Comments (`--` and `/* */`) are stripped.
-- Every single-quoted string literal becomes `?`, honoring `''` escapes.
-- Every numeric literal becomes `?`.
+- Every single-quoted string literal becomes `?`, honoring both `''` and
+  `\'` escapes.
+- Every dollar-quoted string (`$$…$$`, `$tag$…$tag$`) becomes `?`. `$1` /
+  `$2` bind placeholders are left alone.
+- Every numeric literal becomes `?`, including hex (`0x1F`) and binary
+  (`0b1011`) forms.
 - Keywords, structure, and identifiers — including `"double-quoted"` and
   `` `backtick` `` names — are preserved.
 
 It never errors; unparseable input still comes out with its literals gone.
 
+_Changed in 0.3._ Only the `''` escape was honored before, so a literal
+containing `\'` closed at the wrong quote and the scanner then copied the
+_following_ literal's contents out as query structure. Numeric redaction
+stopped at the radix prefix, leaving `0x4142` as `?x4142` — the payload
+intact. _Added in 0.3._ Dollar-quoted strings were not recognised at all and
+passed through whole.
+
 ```text
 in:  SELECT * FROM "users" WHERE email = 'a@b.c' AND age > 30 -- vip
 out: SELECT * FROM "users" WHERE email = ? AND age > ?
 ```
+
+### When the dialect is ambiguous, it over-redacts
+
+Dialects disagree about whether a backslash escapes a quote. MySQL's default
+`sql_mode` and PostgreSQL's `E'…'` strings say yes; PostgreSQL with
+`standard_conforming_strings` says the backslash is an ordinary byte. The two
+readings disagree about _where a literal ends_, and picking the wrong one
+desynchronises the lexer — it closes a literal at the wrong quote and then
+emits the next literal's contents as if they were query structure.
+
+So `Redact` scans under both readings and redacts the union. A byte that is
+inside a literal under _either_ reading is replaced:
+
+```text
+in:  SELECT * FROM t WHERE path = 'C:\' AND secret = 'hunter2'
+out: SELECT * FROM t WHERE path = ?
+```
+
+That output has lost the `AND secret =` structure, which is the deliberate
+trade: losing structure costs readability, and under-redacting leaks a value.
+SQL with no backslash in it is unambiguous, scans identically under both
+readings, and is unaffected.
+
+One consequence is worth knowing about, because it reaches past readability:
+an over-redacted query has a **different fingerprint** from the same query
+with an unambiguous value. Above, `p = 'C:\'` folds to
+`… WHERE p = ?` while `p = 'plain'` folds to `… WHERE p = ? AND id = ?`. So a
+query whose values only _sometimes_ end in a backslash — Windows paths,
+`LIKE … ESCAPE` patterns, regexes — groups under two fingerprints instead of
+one. That splits [N+1](n-plus-one) counts across both (a run that would trip
+a threshold of 20 may land as 12 and 8 and trip neither) and lets the
+[de-duplicator](noise-control) emit the same finding once per group. Bind
+parameters avoid it entirely, and are the better answer for those values
+anyway.
+
+### One dialect gap to know about
+
+A `"double-quoted"` run is treated as an **identifier** and preserved. That is
+correct for ANSI SQL, for PostgreSQL, and for MySQL under `ANSI_QUOTES` — but
+MySQL's default `sql_mode` also accepts `"…"` as a _string literal_, and
+sqlguard does not redact it. Preserving quoted identifiers is what keeps
+ORM-generated SQL readable in a finding, so the trade is deliberate. On MySQL,
+use `'…'` or bind parameters for values you want redacted.
 
 `Result.Query` is set from `Redact` centrally in `Analyzer.Analyze`, and the
 findings built outside the rule path — `slow-query` and `n-plus-one` — go
