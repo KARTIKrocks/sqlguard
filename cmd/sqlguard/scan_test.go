@@ -970,8 +970,7 @@ func TestNewReporter_EachCallGetsItsOwnWriteError(t *testing.T) {
 
 	var sink bytes.Buffer
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() { defer wg.Done(); _, _ = sink.ReadFrom(rOK) }()
+	wg.Go(func() { ; _, _ = sink.ReadFrom(rOK) })
 
 	repBroken.Report([]analyzer.Result{{RuleName: "select-star"}})
 	repOK.Report([]analyzer.Result{{RuleName: "select-star"}})
