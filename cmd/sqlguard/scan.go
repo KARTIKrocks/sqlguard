@@ -62,7 +62,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 		dir = trimPatternSuffix(args[0])
 	}
 
-	rep, err := newReporter(formatFlag)
+	rep, writeErr, err := newReporter(formatFlag)
 	if err != nil {
 		return err
 	}
@@ -86,28 +86,13 @@ func runScan(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("scan failed: %w", err)
 	}
 
-	// JSON reports unconditionally: a consumer that redirects stdout must get
-	// a parseable array on a clean run too, not an empty file. The counts go
-	// to stderr only, so stdout stays pure JSON.
-	if formatFlag == "json" {
-		rep.Report(allResults)
-		if werr := jsonWriteErr(); werr != nil {
-			return werr
-		}
-		if len(allResults) > 0 {
-			return errIssuesFound
-		}
-		return nil
-	}
-
-	if len(allResults) > 0 {
-		rep.Report(allResults)
-		_, _ = fmt.Fprintf(os.Stderr, "\n%d issue(s) found (%d file(s) scanned)\n", len(allResults), totalFiles)
-		return errIssuesFound
-	}
-
-	_, _ = fmt.Fprintf(os.Stderr, "No issues found (%d file(s) scanned)\n", totalFiles)
-	return nil
+	return report(rep, formatFlag, allResults, writeErr,
+		func() {
+			_, _ = fmt.Fprintf(os.Stderr, "\n%d issue(s) found (%d file(s) scanned)\n", len(allResults), totalFiles)
+		},
+		func() {
+			_, _ = fmt.Fprintf(os.Stderr, "No issues found (%d file(s) scanned)\n", totalFiles)
+		})
 }
 
 // trimPatternSuffix accepts the `./...` spelling every Go tool takes. The scan
@@ -164,33 +149,57 @@ func (c *checkedWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
-// jsonOut is the stdout wrapper the JSON reporter writes through, so runScan
-// and runExplain can see a failed write. Package-level because the reporter is
-// built in newReporter, which the two commands share.
-var jsonOut *checkedWriter
+// writeErr reports a failed write, so a truncated artifact on a full disk
+// fails the step instead of passing as green.
+func (c *checkedWriter) writeErr() error {
+	if c.err != nil {
+		return fmt.Errorf("writing JSON output: %w", c.err)
+	}
+	return nil
+}
 
 // newReporter sends machine-readable output to stdout and human-readable
 // output to stderr. JSON is the program's product — `--format json > out.json`
 // and a pipe both have to receive it — while the console format is a
 // diagnostic that shares stderr with the progress and summary lines.
-func newReporter(format string) (reporter.Reporter, error) {
+//
+// The returned writeErr belongs to this reporter rather than to package state,
+// so two invocations in one process cannot read each other's write result.
+func newReporter(format string) (rep reporter.Reporter, writeErr func() error, err error) {
 	switch format {
 	case "json":
-		jsonOut = &checkedWriter{w: os.Stdout}
-		return reporter.NewJSONReporterTo(jsonOut), nil
+		out := &checkedWriter{w: os.Stdout}
+		return reporter.NewJSONReporterTo(out), out.writeErr, nil
 	case "console", "":
-		return reporter.NewConsoleReporter(), nil
+		return reporter.NewConsoleReporter(), func() error { return nil }, nil
 	default:
-		return nil, fmt.Errorf("unknown format %q: use 'console' or 'json'", format)
+		return nil, nil, fmt.Errorf("unknown format %q: use 'console' or 'json'", format)
 	}
 }
 
-// jsonWriteErr reports a failed JSON write, so a truncated artifact on a full
-// disk fails the step instead of passing as green.
-func jsonWriteErr() error {
-	if jsonOut != nil && jsonOut.err != nil {
-		return fmt.Errorf("writing JSON output: %w", jsonOut.err)
+// report applies the output policy both commands share. JSON always reports,
+// so a redirect receives an array even on a clean run; the console format
+// stays quiet unless there is something to render, and leaves the wording of
+// the summary lines to the caller. Findings mean errIssuesFound either way.
+func report(rep reporter.Reporter, format string, results []analyzer.Result, writeErr func() error, found, clean func()) error {
+	if format == "json" {
+		rep.Report(results)
+		if err := writeErr(); err != nil {
+			return err
+		}
+		if len(results) > 0 {
+			return errIssuesFound
+		}
+		return nil
 	}
+
+	if len(results) > 0 {
+		rep.Report(results)
+		found()
+		return errIssuesFound
+	}
+
+	clean()
 	return nil
 }
 

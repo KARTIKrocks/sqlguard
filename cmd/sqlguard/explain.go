@@ -42,7 +42,7 @@ func runExplain(cmd *cobra.Command, args []string) error {
 
 	// Validate the format before dialing: a typo should cost an error message,
 	// not a connection attempt followed by a silent fall back to console.
-	rep, err := newReporter(explainFormat)
+	rep, writeErr, err := newReporter(explainFormat)
 	if err != nil {
 		return err
 	}
@@ -70,23 +70,11 @@ func runExplain(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if explainFormat == "json" {
-		rep.Report(result.Issues)
-		if werr := jsonWriteErr(); werr != nil {
-			return werr
-		}
-		if len(result.Issues) > 0 {
-			return errIssuesFound
-		}
-		return nil
-	}
-
-	if len(result.Issues) > 0 {
-		rep.Report(result.Issues)
-		fmt.Fprintf(os.Stderr, "\n%d issue(s) found in query plan\n", len(result.Issues))
-		return errIssuesFound
-	}
-
-	fmt.Fprintln(os.Stderr, "No issues found in query plan")
-	return nil
+	return report(rep, explainFormat, result.Issues, writeErr,
+		func() {
+			fmt.Fprintf(os.Stderr, "\n%d issue(s) found in query plan\n", len(result.Issues))
+		},
+		func() {
+			fmt.Fprintln(os.Stderr, "No issues found in query plan")
+		})
 }

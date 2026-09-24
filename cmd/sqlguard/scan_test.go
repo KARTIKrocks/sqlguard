@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 
+	"github.com/KARTIKrocks/sqlguard/analyzer"
+	"github.com/KARTIKrocks/sqlguard/reporter"
 	"github.com/spf13/cobra"
 )
 
@@ -649,9 +652,19 @@ func f(db *sql.DB) {
 	if err != nil {
 		t.Fatalf("expected exit 0 on a clean tree, got %v", err)
 	}
+	// The promise is literally `[]`. Decoding alone would not pin it: `null`
+	// unmarshals into a slice without error and leaves it nil with length 0,
+	// so a reporter that switched to a nil slice would emit `null` and still
+	// satisfy a len()-only assertion.
+	if strings.TrimSpace(stdout) != "[]" {
+		t.Errorf("clean run must emit []; got %q", stdout)
+	}
 	var got []map[string]any
 	if uerr := json.Unmarshal([]byte(stdout), &got); uerr != nil {
 		t.Fatalf("clean run must still emit a parseable array, got %q (%v)", stdout, uerr)
+	}
+	if got == nil {
+		t.Errorf("decoded to a nil slice, which means `null` rather than `[]`: %q", stdout)
 	}
 	if len(got) != 0 {
 		t.Errorf("expected an empty array, got %s", stdout)
@@ -747,15 +760,12 @@ func TestCheckedWriter_RecordsFirstError(t *testing.T) {
 		t.Errorf("the first error should be kept, got %v", cw.err)
 	}
 
-	jsonOut = cw
-	t.Cleanup(func() { jsonOut = nil })
-	if err := jsonWriteErr(); !errors.Is(err, sentinel) {
-		t.Errorf("jsonWriteErr should surface the recorded error, got %v", err)
+	if err := cw.writeErr(); !errors.Is(err, sentinel) {
+		t.Errorf("writeErr should surface the recorded error, got %v", err)
 	}
 
-	jsonOut = nil
-	if err := jsonWriteErr(); err != nil {
-		t.Errorf("no reporter means no error, got %v", err)
+	if err := (&checkedWriter{w: io.Discard}).writeErr(); err != nil {
+		t.Errorf("a writer that never failed reports no error, got %v", err)
 	}
 }
 
@@ -773,4 +783,211 @@ func (f *failingWriter) Write(p []byte) (int, error) {
 	}
 	f.written += len(p)
 	return len(p), nil
+}
+
+// recordingReporter captures what it was handed, including whether it was
+// called at all — which is the difference between the JSON and console paths.
+type recordingReporter struct {
+	calls   int
+	results []analyzer.Result
+}
+
+func (r *recordingReporter) Report(results []analyzer.Result) {
+	r.calls++
+	r.results = append(r.results, results...)
+}
+
+// The output policy below is shared by scan and explain. explain's own path
+// cannot be reached in a unit test without a live database, so the logic lives
+// in one helper and is pinned here instead: the JSON and console branches, the
+// exit codes, and the write-error escalation.
+
+func TestReport_JSONPolicy(t *testing.T) {
+	noWriteErr := func() error { return nil }
+
+	t.Run("reports even when clean", func(t *testing.T) {
+		rep := &recordingReporter{}
+		var foundCalled, cleanCalled bool
+		err := report(rep, "json", nil, noWriteErr,
+			func() { foundCalled = true }, func() { cleanCalled = true })
+
+		if err != nil {
+			t.Errorf("clean json run should exit 0, got %v", err)
+		}
+		if rep.calls != 1 {
+			t.Errorf("json must report unconditionally so a redirect gets an array; calls=%d", rep.calls)
+		}
+		if foundCalled || cleanCalled {
+			t.Errorf("summary lines must stay off the json path (found=%v clean=%v)", foundCalled, cleanCalled)
+		}
+	})
+
+	t.Run("findings exit non-zero", func(t *testing.T) {
+		rep := &recordingReporter{}
+		err := report(rep, "json", []analyzer.Result{{RuleName: "select-star"}}, noWriteErr,
+			func() {}, func() {})
+
+		if !errors.Is(err, errIssuesFound) {
+			t.Errorf("expected errIssuesFound, got %v", err)
+		}
+		if rep.calls != 1 || len(rep.results) != 1 {
+			t.Errorf("expected the finding reported once, calls=%d results=%d", rep.calls, len(rep.results))
+		}
+	})
+}
+
+func TestReport_ConsolePolicy(t *testing.T) {
+	noWriteErr := func() error { return nil }
+
+	t.Run("stays quiet when clean", func(t *testing.T) {
+		rep := &recordingReporter{}
+		var cleanCalled bool
+		err := report(rep, "console", nil, noWriteErr, func() {}, func() { cleanCalled = true })
+
+		if err != nil {
+			t.Errorf("clean console run should exit 0, got %v", err)
+		}
+		if rep.calls != 0 {
+			t.Errorf("console must not render an empty report, calls=%d", rep.calls)
+		}
+		if !cleanCalled {
+			t.Error("the clean summary line should have been written")
+		}
+	})
+
+	t.Run("findings report and summarise", func(t *testing.T) {
+		rep := &recordingReporter{}
+		var foundCalled bool
+		err := report(rep, "console", []analyzer.Result{{RuleName: "select-star"}}, noWriteErr,
+			func() { foundCalled = true }, func() {})
+
+		if !errors.Is(err, errIssuesFound) {
+			t.Errorf("expected errIssuesFound, got %v", err)
+		}
+		if rep.calls != 1 || !foundCalled {
+			t.Errorf("expected one report plus the summary line, calls=%d found=%v", rep.calls, foundCalled)
+		}
+	})
+}
+
+// TestReport_WriteErrorWins pins the escalation: a truncated artifact must not
+// be reported as a findings-only result, nor as a clean run.
+func TestReport_WriteErrorWins(t *testing.T) {
+	sentinel := errors.New("no space left on device")
+	failing := func() error { return sentinel }
+
+	for _, tc := range []struct {
+		name    string
+		results []analyzer.Result
+	}{
+		{"with findings", []analyzer.Result{{RuleName: "select-star"}}},
+		{"otherwise clean", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := report(&recordingReporter{}, "json", tc.results, failing, func() {}, func() {})
+			if !errors.Is(err, sentinel) {
+				t.Errorf("expected the write error, got %v", err)
+			}
+			if errors.Is(err, errIssuesFound) {
+				t.Error("the write failure should be the reported error")
+			}
+		})
+	}
+}
+
+// TestNewReporter_JSONTargetsStdout pins the routing itself, independently of
+// any command, so explain inherits the guarantee from the same helper it uses.
+func TestNewReporter_JSONTargetsStdout(t *testing.T) {
+	// The reporter fixes its writer at construction (see reporter.JSONReporter),
+	// so the swap has to happen before newReporter, not after.
+	oldOut, oldErr := os.Stdout, os.Stderr
+	rOut, wOut, _ := os.Pipe()
+	rErr, wErr, _ := os.Pipe()
+	os.Stdout, os.Stderr = wOut, wErr
+
+	rep, writeErr, err := newReporter("json")
+	if err != nil {
+		os.Stdout, os.Stderr = oldOut, oldErr
+		t.Fatalf("json format should be accepted: %v", err)
+	}
+	if writeErr() != nil {
+		os.Stdout, os.Stderr = oldOut, oldErr
+		t.Fatalf("a fresh reporter has no write error: %v", writeErr())
+	}
+	jr, ok := rep.(*reporter.JSONReporter)
+	if !ok {
+		os.Stdout, os.Stderr = oldOut, oldErr
+		t.Fatalf("expected a *reporter.JSONReporter, got %T", rep)
+	}
+
+	var bufOut, bufErr bytes.Buffer
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); _, _ = bufOut.ReadFrom(rOut) }()
+	go func() { defer wg.Done(); _, _ = bufErr.ReadFrom(rErr) }()
+
+	jr.Report([]analyzer.Result{{RuleName: "select-star"}})
+
+	wOut.Close()
+	wErr.Close()
+	wg.Wait()
+	rOut.Close()
+	rErr.Close()
+	os.Stdout, os.Stderr = oldOut, oldErr
+
+	if !strings.Contains(bufOut.String(), "select-star") {
+		t.Errorf("json reporter did not write to stdout:\n%s", bufOut.String())
+	}
+	if bufErr.Len() != 0 {
+		t.Errorf("json reporter wrote to stderr:\n%s", bufErr.String())
+	}
+}
+
+// TestNewReporter_EachCallGetsItsOwnWriteError guards against the write result
+// living in package state, where a second invocation in the same process could
+// clear or claim the first one's failure. The first reporter is built over a
+// stdout that is already closed, so its write genuinely fails; the second is
+// built over a working pipe and must stay clean.
+func TestNewReporter_EachCallGetsItsOwnWriteError(t *testing.T) {
+	oldOut := os.Stdout
+	defer func() { os.Stdout = oldOut }()
+
+	rBad, wBad, _ := os.Pipe()
+	rBad.Close()
+	wBad.Close()
+	os.Stdout = wBad
+	repBroken, brokenErr, err := newReporter("json")
+	if err != nil {
+		t.Fatalf("newReporter (broken stdout): %v", err)
+	}
+
+	rOK, wOK, _ := os.Pipe()
+	os.Stdout = wOK
+	repOK, okErr, err := newReporter("json")
+	if err != nil {
+		t.Fatalf("newReporter (working stdout): %v", err)
+	}
+
+	var sink bytes.Buffer
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() { defer wg.Done(); _, _ = sink.ReadFrom(rOK) }()
+
+	repBroken.Report([]analyzer.Result{{RuleName: "select-star"}})
+	repOK.Report([]analyzer.Result{{RuleName: "select-star"}})
+
+	wOK.Close()
+	wg.Wait()
+	rOK.Close()
+	os.Stdout = oldOut
+
+	if brokenErr() == nil {
+		t.Error("the failed write was not recorded by its own reporter")
+	}
+	if okErr() != nil {
+		t.Errorf("the healthy reporter inherited another run's failure: %v", okErr())
+	}
+	if !strings.Contains(sink.String(), "select-star") {
+		t.Errorf("the healthy reporter did not write its report:\n%s", sink.String())
+	}
 }
