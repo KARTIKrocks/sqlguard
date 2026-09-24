@@ -59,6 +59,43 @@ is the one deliberate, documented exception (the user typed the query on their
 own CLI; it never reaches a log/telemetry sink) — don't generalize that carve-
 out to any other package, and don't flag `explain/` for keeping `Query` raw.
 
+## The literal lexers scan twice on purpose — worked example
+
+`Redact` and `IsMultiStatement` each scan SQL literals under two dialect
+readings, and each takes the **opposite** fail-safe direction. Collapsing
+either to a single pass is a security bug. All three of the following were
+introduced and fixed during PR #61, so treat a "simplification" here with
+suspicion:
+
+1. **Redact honoured only `''` escapes.** A literal containing `\'` — the
+   default escape on MySQL and in Postgres `E'…'` — closed at the wrong quote,
+   desynchronising the lexer so it emitted the *following* literal verbatim:
+   `E'it\'s' AND token = 'sk-live-abcdef'` redacted to
+   `E?s?sk-live-abcdef?`. `Redact` now scans both backslash readings and
+   redacts the **union**; over-redaction is a readability cost, under-redaction
+   is a leak.
+
+2. **`stripComments` and `blankLiterals` disagreed about dollar quotes.**
+   `stripComments` copies a dollar body verbatim (a `--` inside one is data),
+   so a quote in that body reached a blanker that read it as an ordinary
+   literal and blanked everything after it — separator included.
+   `IsMultiStatement("SELECT $$'$$; DROP TABLE t")` returned false. The two
+   lexers must agree.
+
+3. **One `$$` reading is never enough.** Reading `$tag$…$tag$` as a literal
+   hides the `;` in `UPDATE t AS $$ SET id = 1; DROP TABLE t` behind an
+   unterminated body; reading `$$` as ordinary bytes hides the `;` in
+   `SELECT $$'$$; DROP TABLE t` behind an unterminated ordinary literal. Each
+   reading is blind to what the other catches, so `IsMultiStatement` runs both
+   and refuses if **either** sees a separator.
+
+Note that `IsMultiStatement` lives in `analyzer/` but is `explain`'s
+stacked-statement guard, and the MySQL `--allow-dml` path runs read-write
+where DDL implicit-commits past the rollback. A change in `analyzer/` can
+therefore be an EXPLAIN bypass. `TestRedactNoLeakAcrossDialectAmbiguity` and
+`TestIsMultiStatementNeedsBothReadings` pin all of this; a change that deletes
+either test needs to justify itself.
+
 ## Module topology
 
 Nine Go modules (root, `parsers/pgparser`, `parsers/mysqlparser`, and six

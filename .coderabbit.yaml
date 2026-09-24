@@ -73,6 +73,23 @@ reviews:
         library. Rules self-register via analyzer.Register in init(); a new rule
         should be a RuleSpec registration, not a hand-maintained list. Rules read
         the normalized Statement, never raw SQL.
+        The literal lexers scan under more than one dialect reading and neither
+        may be collapsed to a single pass. Redact always treats $tag$...$tag$ as
+        a literal and scans twice over the BACKSLASH question, redacting the
+        UNION — picking one reading desynchronises the lexer, which then emits
+        the FOLLOWING literal's contents as query structure. IsMultiStatement
+        takes the opposite side on both counts: it never honors backslash
+        escapes and scans twice over the $$ question instead, refusing when ANY
+        reading leaves a ';' outside a literal, because each reading is blind to
+        a payload the other catches. Note IsMultiStatement is explain's
+        stacked-statement guard even though it lives here, and the MySQL
+        --allow-dml path runs read-write where DDL implicit-commits past the
+        rollback — weakening it is a security bypass, not a refactor.
+        stripComments and blankLiterals must agree about dollar quotes; when
+        they disagreed, a quote inside a dollar body swallowed a real separator.
+        Flag any change that drops a reading, makes the two lexers disagree, or
+        removes TestRedactNoLeakAcrossDialectAmbiguity /
+        TestIsMultiStatementNeedsBothReadings.
 
     - path: "middleware/**"
       instructions: >-
