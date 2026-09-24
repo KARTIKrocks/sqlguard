@@ -95,18 +95,25 @@ not rely on parameterization:
    takes the widest. The two have opposite fail-safe directions: redaction
    must never leave a literal byte in its output, while this check must never
    miss a separator, so `'a\'; DROP TABLE t; --'` is refused rather than read
-   as one literal. For the same reason a `;` counts as a separator when _any_
-   dialect reading leaves it outside a literal — dollar quoting is
-   Postgres-only, and neither reading of `$$` is safe alone. Read as Postgres,
-   `SELECT $$'$$; DROP TABLE t` hides its `;` behind an unterminated ordinary
-   literal; read as MySQL, where `$$` is just identifier bytes,
-   `UPDATE t AS $$ SET id = 1; DROP TABLE t` hides its `;` behind an
-   unterminated dollar body. Checking both means `SELECT $$a ; b$$` is refused
-   too. A one-statement query occasionally refused is the safe error here. The
-   statement is then classified with the fallback parser: `SELECT` / `WITH`
-   pass; `INSERT` / `UPDATE` / `DELETE` pass only with `--allow-dml`;
-   DDL, `SET`, transaction control and anything unrecognised are always
-   refused.
+   as one literal. The statement is then classified with the fallback parser:
+   `SELECT` / `WITH` pass; `INSERT` / `UPDATE` / `DELETE` pass only with
+   `--allow-dml`; DDL, `SET`, transaction control and anything unrecognised
+   are always refused.
+
+   _Changed in 0.3._ The separator check previously scanned with a single
+   reading of `$$`, which let some stacked input through. It now counts a `;`
+   as a separator whenever _any_ dialect reading leaves it outside a literal,
+   because each reading of `$$` is blind to a different payload. Scanning
+   `$tag$…$tag$` as a literal is what hides the `;` in
+   `UPDATE t AS $$ SET id = 1; DROP TABLE t` — on MySQL those are identifier
+   bytes, but that reading opens an unterminated dollar body which swallows
+   the rest. Leaving `$$` as ordinary bytes is what hides the `;` in
+   `SELECT $$'$$; DROP TABLE t` — on PostgreSQL the apostrophe is data inside
+   the dollar body, but that reading opens an unterminated ordinary literal
+   which swallows the rest. Each catches what the other misses, so both run.
+   The cost is that a single statement carrying a `;` inside a dollar-quoted
+   body, such as `SELECT $$a ; b$$`, is refused; a one-statement query
+   occasionally rejected is the safe error here.
 2. **A transaction that is always rolled back.** Every `EXPLAIN` runs
    inside `BeginTx` with a deferred `Rollback`. Nothing commits.
 3. **Never `ANALYZE`.** `EXPLAIN ANALYZE` executes the statement to collect

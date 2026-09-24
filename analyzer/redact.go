@@ -18,14 +18,12 @@ import (
 //
 // It is a zero-dependency lexical pass, not a full parser, and never errors.
 // Where a dialect ambiguity makes the end of a literal uncertain it
-// deliberately over-redacts (see redactSpans): losing structure is a
-// readability cost, whereas under-redacting is a PII leak.
+// over-redacts rather than risk a leak; see redactSpans.
 //
-// One dialect caveat is deliberate: a double-quoted run is treated as an
-// identifier and preserved. That is correct for ANSI/Postgres, and for MySQL
-// under ANSI_QUOTES, but MySQL's default sql_mode also accepts "…" as a
-// string literal — so on MySQL, prefer '…' (or bind parameters) for values if
-// you want them redacted. Backtick runs are always identifiers.
+// One dialect gap is deliberate: a double-quoted run is kept as an identifier,
+// which is right for ANSI/Postgres and for MySQL under ANSI_QUOTES but not for
+// MySQL's default sql_mode, where "…" is also a string literal. On MySQL use
+// '…' or bind parameters for values. Backticks are always identifiers.
 //
 // Use it whenever a query is about to leave the process.
 func Redact(sql string) string {
@@ -45,8 +43,7 @@ func Redact(sql string) string {
 			ki++
 		}
 
-		// A literal — the classic PII carrier. Replace its whole body, quotes
-		// included, with one placeholder.
+		// One placeholder for the whole literal, quotes included.
 		if ri < len(redact) && i >= redact[ri].lo {
 			b.WriteByte('?')
 			prev = '?'
@@ -54,8 +51,7 @@ func Redact(sql string) string {
 			continue
 		}
 
-		// Digits inside a quoted identifier ("2024_events", `col1`) are part
-		// of a name, not a value, so they are never redacted.
+		// Digits in a quoted identifier ("2024_events") are part of a name.
 		inIdent := ki < len(keep) && i >= keep[ki].lo
 
 		c := s[i]
@@ -80,17 +76,14 @@ var fpListRe = regexp.MustCompile(`\(\?(?:, ?\?)+\)`)
 // ("(?, ?, ?)" -> "(?)") so that queries differing only in literal values or
 // list length share one fingerprint. A trailing ";" is trimmed.
 //
-// The result is safe to use as a low-cardinality metric label or log key —
-// it is the canonical query identity the runtime, the N+1 tracker, and any
-// metrics/observability adapter group on.
+// It is the canonical query identity the runtime, the N+1 tracker and any
+// metrics adapter group on, and is safe as a low-cardinality metric label.
 func Fingerprint(sql string) string {
 	return foldRedacted(Redact(sql))
 }
 
-// foldRedacted applies the fingerprint's normalization to SQL that has
-// already been through Redact. It exists so a caller needing both the
-// redacted text and the fingerprint (Analyzer.PrepareQuery) pays for one
-// redaction pass rather than two.
+// foldRedacted applies the fingerprint's normalization to already-redacted
+// SQL, so a caller needing both forms (Analyzer.PrepareQuery) redacts once.
 func foldRedacted(redacted string) string {
 	r := strings.Join(strings.Fields(redacted), " ")
 	r = fpListRe.ReplaceAllString(r, "(?)")
@@ -100,10 +93,9 @@ func foldRedacted(redacted string) string {
 // IsMultiStatement reports whether sql contains more than one SQL statement,
 // i.e. a ";" statement separator followed by further non-whitespace content.
 // Comments and string-literal bodies are removed first (reusing the same
-// comment/literal-aware lexer the parser uses), so the check cannot be
-// defeated by a ";" hidden in a -- / /* */ comment or inside a string
-// literal — the evasion the brittle strings.Contains(query, ";") check
-// allowed. A single trailing ";" is not multi-statement.
+// comment/literal-aware lexer the parser uses), so a ";" hidden in a -- or
+// /* */ comment, or inside a string literal, cannot defeat it. A single
+// trailing ";" is not multi-statement.
 //
 // Note that this deliberately uses the *narrowest* reading of a literal,
 // which is the opposite of what Redact does. The two have opposite fail-safe
@@ -114,16 +106,14 @@ func foldRedacted(redacted string) string {
 //   - Backslash escapes are not honored. Treating "\'" as an escape would let
 //     `'a\'; DROP TABLE t; --'` read as one literal and hide the second
 //     statement.
-//   - A ";" counts as a separator when *any* dialect reading leaves it
-//     outside a literal, so the dollar-quote reading is checked both ways.
-//     Postgres-only: `$$'$$; DROP TABLE t` hides the ";" behind an
-//     unterminated ordinary literal unless dollar quotes are honored.
-//     Everywhere else: MySQL reads "$$" as identifier bytes, so
-//     `UPDATE t AS $$ SET id = 1; DROP TABLE t` hides the ";" behind an
-//     unterminated dollar body unless they are not. Neither reading is safe
-//     alone, and the statement reaches EXPLAIN inside the read-write
-//     transaction --allow-dml uses, where DDL implicit-commits past the
-//     rollback.
+//   - Both readings of "$$" are run and either one finding a separator is
+//     enough, because each is blind to a payload the other catches. Reading
+//     it as a dollar delimiter hides the ";" in
+//     `UPDATE t AS $$ SET id = 1; DROP TABLE t` behind an unterminated body;
+//     reading it as ordinary bytes hides the ";" in
+//     `SELECT $$'$$; DROP TABLE t` behind an unterminated ordinary literal.
+//     Dropping either one is a bypass, pinned by
+//     TestIsMultiStatementNeedsBothReadings.
 //
 // The cost is that a single statement carrying a ";" inside a dollar-quoted
 // body is refused. Over-rejection is the affordable error here.
@@ -164,11 +154,9 @@ type span struct{ lo, hi int }
 // ambiguous input pays with over-redaction.
 func redactSpans(s string) (redact, keep []span) {
 	loose, keepLoose := literalSpans(s, false)
-	// The readings can only diverge where a backslash sits inside a quoted
-	// run, so a query with no backslash at all provably scans identically
-	// under both and the second pass is skipped. That is the overwhelmingly
-	// common case, and it matters: Fingerprint (hence Redact) runs per query
-	// execution on the N+1 tracker's path, not just per distinct query.
+	// The readings can only diverge at a backslash inside a quoted run, so
+	// without one the second pass is provably identical and is skipped —
+	// Redact runs per query execution on the N+1 tracker's path.
 	if strings.IndexByte(s, '\\') < 0 {
 		return loose, keepLoose
 	}
@@ -247,9 +235,7 @@ func scanQuotedRun(s string, i int, backslashEscapes bool) int {
 // input rather than being rejected: on a truncated or malformed query the
 // remainder is literal body, and leaving it unredacted would leak it.
 func scanDollarQuoted(s string, i int) (end, tagLen int, ok bool) {
-	// A delimiter cannot follow an identifier byte — that "$" belongs to the
-	// identifier. Without this, "foo$tag$v$tag$" would redact to "foo?".
-	if i > 0 && isIdentByte(s[i-1]) {
+	if i > 0 && isIdentByte(s[i-1]) { // "$" continues an identifier
 		return 0, 0, false
 	}
 	j := i + 1

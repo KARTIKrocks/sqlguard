@@ -258,3 +258,48 @@ func contains(s, sub string) bool {
 	}
 	return false
 }
+
+// TestIsMultiStatementNeedsBothReadings pins the rationale in
+// IsMultiStatement's doc comment: each reading of "$$" is blind to a
+// different payload, so neither can be dropped. Without this, "simplifying"
+// the check back to one reading looks safe — the existing table would still
+// pass for whichever payload that reading happens to catch.
+func TestIsMultiStatementNeedsBothReadings(t *testing.T) {
+	cases := []struct {
+		name string
+		sql  string
+		// which reading leaves the ";" visible; the other one hides it
+		seenWithDollarQuotes bool
+	}{
+		// "$$" is identifier bytes on MySQL, but reading it as a dollar
+		// delimiter opens an unterminated body that swallows the separator.
+		{"caught only without dollar quotes",
+			`UPDATE t AS $$ SET id = 1; DROP TABLE t`, false},
+		// The apostrophe is data inside a Postgres dollar body, but reading
+		// "$$" as ordinary bytes opens an unterminated literal instead.
+		{"caught only with dollar quotes",
+			`SELECT $$'$$; DROP TABLE t`, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s := stripComments(c.sql)
+			withDollar := hasStatementSeparator(blankLiterals(s, true))
+			without := hasStatementSeparator(blankLiterals(s, false))
+
+			if withDollar != c.seenWithDollarQuotes {
+				t.Errorf("dollar-quote reading: separator visible = %v, want %v",
+					withDollar, c.seenWithDollarQuotes)
+			}
+			if without != !c.seenWithDollarQuotes {
+				t.Errorf("ordinary-quote reading: separator visible = %v, want %v",
+					without, !c.seenWithDollarQuotes)
+			}
+			if withDollar == without {
+				t.Fatal("both readings agree; this case no longer proves both are needed")
+			}
+			if !IsMultiStatement(c.sql) {
+				t.Error("IsMultiStatement must refuse this input")
+			}
+		})
+	}
+}
