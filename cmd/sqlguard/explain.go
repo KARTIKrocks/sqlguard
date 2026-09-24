@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/KARTIKrocks/sqlguard/explain"
-	"github.com/KARTIKrocks/sqlguard/reporter"
 	"github.com/spf13/cobra"
 )
 
@@ -41,6 +40,13 @@ func runExplain(cmd *cobra.Command, args []string) error {
 
 	query := args[0]
 
+	// Validate the format before dialing: a typo should cost an error message,
+	// not a connection attempt followed by a silent fall back to console.
+	rep, writeErr, err := newReporter(explainFormat)
+	if err != nil {
+		return err
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -64,24 +70,11 @@ func runExplain(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	var rep reporter.Reporter
-	switch explainFormat {
-	case "json":
-		rep = reporter.NewJSONReporter()
-	default:
-		rep = reporter.NewConsoleReporter()
-	}
-
-	if len(result.Issues) > 0 {
-		rep.Report(result.Issues)
-		if explainFormat != "json" {
+	return report(rep, explainFormat, result.Issues, writeErr,
+		func() {
 			fmt.Fprintf(os.Stderr, "\n%d issue(s) found in query plan\n", len(result.Issues))
-		}
-		return errIssuesFound
-	}
-
-	if explainFormat != "json" {
-		fmt.Fprintln(os.Stderr, "No issues found in query plan")
-	}
-	return nil
+		},
+		func() {
+			fmt.Fprintln(os.Stderr, "No issues found in query plan")
+		})
 }

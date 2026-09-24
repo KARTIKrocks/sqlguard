@@ -67,6 +67,11 @@ the same version in lockstep.
 
 ### Fixed
 
+- **CLI JSON output went to stderr**, so `--format json > findings.json` — the
+  only reason the format exists — wrote an empty file, and piping into `jq`
+  saw nothing. `scan` and `explain` now write JSON to stdout; the console
+  format and the summary lines stay on stderr. A clean run also emits `[]`
+  instead of nothing, so a consumer is never handed an empty file to parse.
 - **CLI `scan` rejected the `./...` path every doc example uses**, failing with
   `scan failed: lstat ./...: no such file or directory`. The scan has always
   been recursive, so the pattern suffix is now trimmed and `./pkg/...` selects
