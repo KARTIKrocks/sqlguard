@@ -37,9 +37,11 @@ var formatFlag string
 var scanCmd = &cobra.Command{
 	Use:   "scan [path]",
 	Short: "Scan Go source files for SQL query issues",
-	Long:  "Statically analyzes Go source files to find SQL queries and check them for common issues.",
-	Args:  cobra.MaximumNArgs(1),
-	RunE:  runScan,
+	Long: "Statically analyzes Go source files to find SQL queries and check them for common issues.\n\n" +
+		"The scan is always recursive. A path may be written either plainly (./pkg)\n" +
+		"or with the Go package-pattern suffix (./pkg/...); both select the same files.",
+	Args: cobra.MaximumNArgs(1),
+	RunE: runScan,
 }
 
 func init() {
@@ -56,7 +58,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 
 	dir := "."
 	if len(args) > 0 {
-		dir = args[0]
+		dir = trimPatternSuffix(args[0])
 	}
 
 	rep, err := newReporter(formatFlag)
@@ -95,6 +97,27 @@ func runScan(cmd *cobra.Command, args []string) error {
 		_, _ = fmt.Fprintf(os.Stderr, "No issues found (%d file(s) scanned)\n", totalFiles)
 	}
 	return nil
+}
+
+// trimPatternSuffix accepts the `./...` spelling every Go tool takes. The scan
+// is already recursive, so `dir/...` selects exactly what `dir` does and the
+// suffix only has to be removed before the path reaches the filesystem.
+//
+// The suffix must be separator-anchored: a directory really named `weird...`
+// is a legal path, and trimming it unanchored would silently scan `weird`
+// instead and report a clean exit for a tree that was never looked at.
+func trimPatternSuffix(path string) string {
+	if path != "..." && !strings.HasSuffix(path, "/...") {
+		return path
+	}
+	trimmed := strings.TrimSuffix(path, "...")
+	switch trimmed {
+	case "":
+		return "."
+	case "/":
+		return "/"
+	}
+	return strings.TrimSuffix(trimmed, "/")
 }
 
 func newReporter(format string) (reporter.Reporter, error) {

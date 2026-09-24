@@ -336,6 +336,13 @@ func f(db *sql.DB) {
 // Returns the output and the error (errIssuesFound if issues were found).
 func captureScanOutput(t *testing.T, dir string) (string, error) {
 	t.Helper()
+	return captureScanTarget(t, dir)
+}
+
+// captureScanTarget is captureScanOutput for a target that is not a plain
+// directory path, such as the `./...` package-pattern spelling.
+func captureScanTarget(t *testing.T, target string) (string, error) {
+	t.Helper()
 
 	// Reset format flag to default for each test
 	formatFlag = "console"
@@ -344,7 +351,7 @@ func captureScanOutput(t *testing.T, dir string) (string, error) {
 	r, w, _ := os.Pipe()
 	os.Stderr = w
 
-	err := runScan(&cobra.Command{}, []string{dir})
+	err := runScan(&cobra.Command{}, []string{target})
 
 	w.Close()
 	os.Stderr = old
@@ -395,5 +402,129 @@ func TestScanCommand_NoUsageDumpOnIssues(t *testing.T) {
 	}
 	if !strings.Contains(out, "delete-without-where") {
 		t.Errorf("expected the finding in output, got:\n%s", out)
+	}
+}
+
+func TestTrimPatternSuffix(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"./...", "."},
+		{"...", "."},
+		{"/...", "/"},
+		{"./pkg/...", "./pkg"},
+		{"pkg/...", "pkg"},
+		{"/abs/pkg/...", "/abs/pkg"},
+		{".", "."},
+		{"./pkg", "./pkg"},
+		{"/abs/pkg", "/abs/pkg"},
+		{"", ""},
+		// Separator-anchored: these are directory names, not patterns.
+		{"weird...", "weird..."},
+		{"./weird...", "./weird..."},
+		{"....", "...."},
+		{"/abs/weird...", "/abs/weird..."},
+	}
+	for _, c := range cases {
+		if got := trimPatternSuffix(c.in); got != c.want {
+			t.Errorf("trimPatternSuffix(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// TestScan_AcceptsPackagePattern pins the `./...` spelling the README and the
+// docs site use. It used to reach filepath.Abs verbatim and fail with
+// "lstat ./...: no such file or directory", so the documented invocation was
+// the one invocation that did not work. The nested file also proves the
+// pattern still reaches subdirectories rather than silently scanning one level.
+func TestScan_AcceptsPackagePattern(t *testing.T) {
+	dir := t.TempDir()
+	createTestFile(t, dir, "top.go", `package example
+import "database/sql"
+func f(db *sql.DB) {
+	db.Query("SELECT * FROM users")
+}
+`)
+	sub := filepath.Join(dir, "nested")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	createTestFile(t, sub, "deep.go", `package nested
+import "database/sql"
+func g(db *sql.DB) {
+	db.Exec("DELETE FROM sessions")
+}
+`)
+
+	out, err := captureScanTarget(t, filepath.Join(dir, "..."))
+
+	if !errors.Is(err, errIssuesFound) {
+		t.Fatalf("expected errIssuesFound for ./... target, got %v\noutput:\n%s", err, out)
+	}
+	if !strings.Contains(out, "select-star") {
+		t.Errorf("pattern target missed the top-level file, got:\n%s", out)
+	}
+	if !strings.Contains(out, "delete-without-where") {
+		t.Errorf("pattern target did not recurse into the subdirectory, got:\n%s", out)
+	}
+}
+
+// TestScan_PatternMatchesPlainPath is the equivalence the fix rests on: the
+// scan is already recursive, so `dir/...` must select exactly what `dir` does.
+func TestScan_PatternMatchesPlainPath(t *testing.T) {
+	dir := t.TempDir()
+	createTestFile(t, dir, "a.go", `package example
+import "database/sql"
+func f(db *sql.DB) {
+	db.Query("SELECT * FROM users")
+}
+`)
+
+	plain, errPlain := captureScanTarget(t, dir)
+	pattern, errPattern := captureScanTarget(t, filepath.Join(dir, "..."))
+
+	if !errors.Is(errPlain, errIssuesFound) || !errors.Is(errPattern, errIssuesFound) {
+		t.Fatalf("both spellings should report issues: plain=%v pattern=%v", errPlain, errPattern)
+	}
+	if plain != pattern {
+		t.Errorf("plain and pattern targets disagree:\nplain:\n%s\npattern:\n%s", plain, pattern)
+	}
+}
+
+// TestScan_DottedDirectoryIsNotAPattern guards the separator anchor. A
+// directory named `weird...` is a legal path; trimming the suffix unanchored
+// pointed the scan at a sibling `weird` instead, which reported that
+// directory's findings under the name the user did not ask for — and would
+// have exited clean had the sibling been clean.
+func TestScan_DottedDirectoryIsNotAPattern(t *testing.T) {
+	root := t.TempDir()
+	dotted := filepath.Join(root, "weird...")
+	plain := filepath.Join(root, "weird")
+	for _, d := range []string{dotted, plain} {
+		if err := os.Mkdir(d, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", d, err)
+		}
+	}
+	createTestFile(t, dotted, "a.go", `package weird
+import "database/sql"
+func f(db *sql.DB) {
+	db.Query("SELECT * FROM users")
+}
+`)
+	createTestFile(t, plain, "b.go", `package weird
+import "database/sql"
+func g(db *sql.DB) {
+	db.Exec("DELETE FROM sessions")
+}
+`)
+
+	out, err := captureScanTarget(t, dotted)
+
+	if !errors.Is(err, errIssuesFound) {
+		t.Fatalf("expected the dotted directory to be scanned, got %v\noutput:\n%s", err, out)
+	}
+	if !strings.Contains(out, "select-star") {
+		t.Errorf("did not scan the directory that was named, got:\n%s", out)
+	}
+	if strings.Contains(out, "delete-without-where") {
+		t.Errorf("scanned the sibling directory instead of the one named, got:\n%s", out)
 	}
 }

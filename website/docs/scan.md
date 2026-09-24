@@ -21,6 +21,14 @@ sqlguard scan ./internal/repository   # one package tree
 sqlguard scan --format json ./...     # machine-readable
 ```
 
+The scan is always recursive, so a path may be written plainly (`./internal`)
+or with the Go package-pattern suffix (`./internal/...`); both select the same
+files. With no path at all it scans the current directory.
+
+_Changed in 0.3._ In 0.2 the pattern spelling was rejected outright —
+`sqlguard scan ./...` failed with `lstat ./...: no such file or directory` —
+so the form used throughout these docs had to be written as `sqlguard scan .`.
+
 | Flag | Default | Effect |
 | --- | --- | --- |
 | `--format console\|json` | `console` | Output shape. JSON is an array of `{rule, severity, query, fingerprint, message, suggestion, file, line}`. |
