@@ -5,50 +5,70 @@ import (
 	"strings"
 )
 
-// Redact returns sql with comments stripped and every single-quoted string
-// literal and numeric literal replaced by a single "?" placeholder. Query
-// structure, keywords, and identifiers (including double-quoted and
-// backtick-quoted identifiers) are preserved, so the result stays readable
-// and analyzable but carries no literal values — no emails, tokens, or other
-// PII reach a log sink.
+// Redact returns sql with comments stripped and every string literal and
+// numeric literal replaced by a single "?" placeholder. Query structure,
+// keywords, and identifiers (including double-quoted and backtick-quoted
+// identifiers) are preserved, so the result stays readable and analyzable but
+// carries no literal values — no emails, tokens, or other PII reach a log
+// sink.
 //
-// It is a zero-dependency lexical pass, not a full parser: it is
-// intentionally conservative (e.g. it does not special-case hex/scientific
-// forms beyond a simple exponent) and never errors. Use it whenever a query
-// is about to leave the process.
+// It covers single-quoted literals (honoring doubled-quote and backslash
+// escapes alike), Postgres dollar-quoted strings ($$…$$ / $tag$…$tag$), and
+// decimal, hex (0x…), binary (0b…) and exponent numeric forms.
+//
+// It is a zero-dependency lexical pass, not a full parser, and never errors.
+// Where a dialect ambiguity makes the end of a literal uncertain it
+// deliberately over-redacts (see redactSpans): losing structure is a
+// readability cost, whereas under-redacting is a PII leak.
+//
+// One dialect caveat is deliberate: a double-quoted run is treated as an
+// identifier and preserved. That is correct for ANSI/Postgres, and for MySQL
+// under ANSI_QUOTES, but MySQL's default sql_mode also accepts "…" as a
+// string literal — so on MySQL, prefer '…' (or bind parameters) for values if
+// you want them redacted. Backtick runs are always identifiers.
+//
+// Use it whenever a query is about to leave the process.
 func Redact(sql string) string {
 	s := stripComments(sql)
+	redact, keep := redactSpans(s)
+
 	var b strings.Builder
 	b.Grow(len(s))
 
 	var prev byte // last byte written to output, 0 at start
+	ri, ki := 0, 0
 	for i := 0; i < len(s); {
-		c := s[i]
-		switch {
-		case c == '\'':
-			// String literal — the classic PII carrier. Replace its whole
-			// body (honoring '' escapes) with one placeholder.
-			i = skipSingleQuoted(s, i)
-			b.WriteByte('?')
-			prev = '?'
-		case c == '"' || c == '`':
-			// Quoted identifier (ANSI double-quote / MySQL backtick). Copy
-			// verbatim so a quote-enclosed name or a stray ' inside it does
-			// not corrupt structure or trip the literal branch.
-			j := skipQuoted(s, i, c)
-			b.WriteString(s[i:j])
-			prev = s[j-1]
-			i = j
-		case isDigit(c) && !suppressesNumber(prev):
-			j := scanNumber(s, i)
-			b.WriteByte('?')
-			prev = '?'
-			i = j
-		default:
-			b.WriteByte(c)
-			prev = c
-			i++
+		for ri < len(redact) && redact[ri].hi <= i {
+			ri++
 		}
+		for ki < len(keep) && keep[ki].hi <= i {
+			ki++
+		}
+
+		// A literal — the classic PII carrier. Replace its whole body, quotes
+		// included, with one placeholder.
+		if ri < len(redact) && i >= redact[ri].lo {
+			b.WriteByte('?')
+			prev = '?'
+			i = redact[ri].hi
+			continue
+		}
+
+		// Digits inside a quoted identifier ("2024_events", `col1`) are part
+		// of a name, not a value, so they are never redacted.
+		inIdent := ki < len(keep) && i >= keep[ki].lo
+
+		c := s[i]
+		if !inIdent && isDigit(c) && !suppressesNumber(prev) {
+			i = scanNumber(s, i)
+			b.WriteByte('?')
+			prev = '?'
+			continue
+		}
+
+		b.WriteByte(c)
+		prev = c
+		i++
 	}
 	return b.String()
 }
@@ -64,8 +84,15 @@ var fpListRe = regexp.MustCompile(`\(\?(?:, ?\?)+\)`)
 // it is the canonical query identity the runtime, the N+1 tracker, and any
 // metrics/observability adapter group on.
 func Fingerprint(sql string) string {
-	r := Redact(sql)
-	r = strings.Join(strings.Fields(r), " ")
+	return foldRedacted(Redact(sql))
+}
+
+// foldRedacted applies the fingerprint's normalization to SQL that has
+// already been through Redact. It exists so a caller needing both the
+// redacted text and the fingerprint (Analyzer.PrepareQuery) pays for one
+// redaction pass rather than two.
+func foldRedacted(redacted string) string {
+	r := strings.Join(strings.Fields(redacted), " ")
 	r = fpListRe.ReplaceAllString(r, "(?)")
 	return strings.TrimRight(r, "; ")
 }
@@ -77,6 +104,14 @@ func Fingerprint(sql string) string {
 // defeated by a ";" hidden in a -- / /* */ comment or inside a string
 // literal — the evasion the brittle strings.Contains(query, ";") check
 // allowed. A single trailing ";" is not multi-statement.
+//
+// Note that this deliberately uses the *narrowest* reading of a literal (no
+// backslash escapes), which is the opposite of what Redact does. The two have
+// opposite fail-safe directions: Redact must never leave a byte of a literal
+// in its output, so it over-consumes; IsMultiStatement must never miss a
+// statement separator, so it under-consumes. Treating "\'" as an escape here
+// would let `'a\'; DROP TABLE t; --'` read as one literal and hide the second
+// statement from explain's guard.
 func IsMultiStatement(sql string) bool {
 	s := blankStringLiterals(stripComments(sql))
 	if _, rest, found := strings.Cut(s, ";"); found {
@@ -85,7 +120,158 @@ func IsMultiStatement(sql string) bool {
 	return false
 }
 
+// ---- literal spans ----
+
+// span is a half-open byte range [lo, hi).
+type span struct{ lo, hi int }
+
+// redactSpans locates the quoted runs in s (which must already be
+// comment-free) and returns the ranges to replace with a placeholder and the
+// ranges to copy through verbatim.
+//
+// Dialects disagree about whether a backslash escapes a quote: MySQL's
+// default sql_mode and Postgres' E'…' strings say yes, Postgres with
+// standard_conforming_strings says the backslash is an ordinary byte that
+// ends nothing. The two readings disagree about where a literal ends, and
+// scanning under the wrong one desynchronises the lexer — it closes a literal
+// early (or late) and then emits the *next* literal's contents as if they
+// were query structure. Neither reading dominates the other, so both are
+// scanned and their literal ranges unioned: a byte that lies inside a literal
+// under either reading is redacted. Ordinary SQL contains no backslash-quote
+// sequence, so the two readings agree and the union is exact; only genuinely
+// ambiguous input pays with over-redaction.
+func redactSpans(s string) (redact, keep []span) {
+	loose, keepLoose := literalSpans(s, false)
+	// The readings can only diverge where a backslash sits inside a quoted
+	// run, so a query with no backslash at all provably scans identically
+	// under both and the second pass is skipped. That is the overwhelmingly
+	// common case, and it matters: Fingerprint (hence Redact) runs per query
+	// execution on the N+1 tracker's path, not just per distinct query.
+	if strings.IndexByte(s, '\\') < 0 {
+		return loose, keepLoose
+	}
+	strict, _ := literalSpans(s, true)
+	return unionSpans(loose, strict), keepLoose
+}
+
+// literalSpans classifies the quoted runs in comment-free s. redact holds
+// single-quoted string literals and Postgres dollar-quoted strings, quotes
+// included; keep holds quoted identifiers ("…" / `…`), which are structure
+// rather than data. backslashEscapes selects the dialect reading described on
+// redactSpans; it never applies inside backticks, which are identifiers in
+// every dialect that has them.
+func literalSpans(s string, backslashEscapes bool) (redact, keep []span) {
+	for i := 0; i < len(s); {
+		switch c := s[i]; c {
+		case '\'':
+			j := scanQuotedRun(s, i, backslashEscapes)
+			redact = append(redact, span{i, j})
+			i = j
+		case '"', '`':
+			j := scanQuotedRun(s, i, backslashEscapes && c == '"')
+			keep = append(keep, span{i, j})
+			i = j
+		case '$':
+			if j, ok := scanDollarQuoted(s, i); ok {
+				redact = append(redact, span{i, j})
+				i = j
+				continue
+			}
+			i++
+		default:
+			i++
+		}
+	}
+	return redact, keep
+}
+
+// scanQuotedRun returns the index just past the quoted run opening at s[i]. A
+// doubled quote is always an escape; a backslash escapes the following byte
+// only when backslashEscapes is set. An unterminated run extends to the end of
+// the input, so a stray quote can never leave its tail unredacted.
+func scanQuotedRun(s string, i int, backslashEscapes bool) int {
+	q := s[i]
+	i++
+	for i < len(s) {
+		switch {
+		case backslashEscapes && s[i] == '\\':
+			i += 2
+		case s[i] == q:
+			if i+1 < len(s) && s[i+1] == q { // doubled-quote escape
+				i += 2
+				continue
+			}
+			return i + 1
+		default:
+			i++
+		}
+	}
+	return len(s)
+}
+
+// scanDollarQuoted returns the index just past the Postgres dollar-quoted
+// string opening at s[i] ($$body$$ or $tag$body$tag$), and true. It reports
+// false when s[i] opens no such string: a "$1"/"$2" bind placeholder (whose
+// tag would start with a digit), a "$" that is part of an identifier, or an
+// unterminated run — which is far more likely to be two ordinary dollar signs
+// than a runaway literal, and treating it as one would swallow the rest of
+// the query.
+func scanDollarQuoted(s string, i int) (int, bool) {
+	j := i + 1
+	for j < len(s) && isIdentByte(s[j]) {
+		if j == i+1 && isDigit(s[j]) {
+			return 0, false // $1 — a bind placeholder, not a tag
+		}
+		j++
+	}
+	if j >= len(s) || s[j] != '$' {
+		return 0, false
+	}
+	tag := s[i : j+1] // "$" + tag + "$"
+	k := strings.Index(s[j+1:], tag)
+	if k < 0 {
+		return 0, false
+	}
+	return j + 1 + k + len(tag), true
+}
+
+// unionSpans merges two ascending, internally non-overlapping span lists into
+// the ascending list of their union.
+func unionSpans(a, b []span) []span {
+	switch {
+	case len(a) == 0:
+		return b
+	case len(b) == 0:
+		return a
+	}
+	merged := make([]span, 0, len(a)+len(b))
+	i, j := 0, 0
+	for i < len(a) || j < len(b) {
+		var next span
+		if j >= len(b) || (i < len(a) && a[i].lo <= b[j].lo) {
+			next, i = a[i], i+1
+		} else {
+			next, j = b[j], j+1
+		}
+		if n := len(merged); n > 0 && next.lo <= merged[n-1].hi {
+			if next.hi > merged[n-1].hi {
+				merged[n-1].hi = next.hi
+			}
+			continue
+		}
+		merged = append(merged, next)
+	}
+	return merged
+}
+
+// ---- token helpers ----
+
 func isDigit(c byte) bool { return c >= '0' && c <= '9' }
+
+func isIdentByte(c byte) bool {
+	return c == '_' || isDigit(c) ||
+		(c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+}
 
 // suppressesNumber reports whether a digit following prev is part of an
 // identifier (col1, int8) or a bind placeholder ($1, @p1) rather than a
@@ -101,9 +287,15 @@ func suppressesNumber(prev byte) bool {
 	return false
 }
 
-// scanNumber returns the index just past the numeric literal starting at i
-// (digits, an optional decimal point, and an optional e[+-]?digits exponent).
+// scanNumber returns the index just past the numeric literal starting at i: a
+// radix-prefixed form (0x1F, 0b1010) or digits with an optional decimal point
+// and an optional e[+-]?digits exponent. Without the radix forms, "0x4142"
+// would redact only the leading "0" and copy the hex payload through as if it
+// were an identifier.
 func scanNumber(s string, i int) int {
+	if j, ok := scanRadixNumber(s, i); ok {
+		return j
+	}
 	for i < len(s) && (isDigit(s[i]) || s[i] == '.') {
 		i++
 	}
@@ -122,37 +314,33 @@ func scanNumber(s string, i int) int {
 	return i
 }
 
-// skipSingleQuoted returns the index just past the single-quoted string
-// literal that opens at s[i], treating a doubled single-quote (two in a row)
-// as an escaped quote rather than the terminator.
-func skipSingleQuoted(s string, i int) int {
-	i++ // opening quote
-	for i < len(s) {
-		if s[i] == '\'' {
-			if i+1 < len(s) && s[i+1] == '\'' {
-				i += 2
-				continue
-			}
-			return i + 1
-		}
-		i++
+// scanRadixNumber returns the index just past a radix-prefixed numeric
+// literal (0x1F, 0b1010) starting at i, and true. It reports false when i does
+// not start one, including a bare "0" followed by an identifier.
+func scanRadixNumber(s string, i int) (int, bool) {
+	if s[i] != '0' || i+1 >= len(s) {
+		return 0, false
 	}
-	return i
+	radix := s[i+1] | 0x20
+	if radix != 'x' && radix != 'b' {
+		return 0, false
+	}
+	j := i + 2
+	for j < len(s) && isRadixDigit(s[j], radix) {
+		j++
+	}
+	if j == i+2 {
+		return 0, false
+	}
+	return j, true
 }
 
-// skipQuoted returns the index just past the quoted run starting at s[i] == q
-// (q is '"' or '`'), honoring doubled-quote escapes for the same quote.
-func skipQuoted(s string, i int, q byte) int {
-	i++ // opening quote
-	for i < len(s) {
-		if s[i] == q {
-			if i+1 < len(s) && s[i+1] == q {
-				i += 2
-				continue
-			}
-			return i + 1
-		}
-		i++
+// isRadixDigit reports whether c is a valid digit for the given radix prefix
+// ('x' for hexadecimal, 'b' for binary).
+func isRadixDigit(c byte, radix byte) bool {
+	if radix == 'b' {
+		return c == '0' || c == '1'
 	}
-	return i
+	lower := c | 0x20
+	return isDigit(c) || (lower >= 'a' && lower <= 'f')
 }

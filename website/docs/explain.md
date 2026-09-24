@@ -89,7 +89,14 @@ not rely on parameterization:
 1. **Validation.** Empty input is refused. Multi-statement input is refused
    using a comment- and string-literal-aware check
    (`analyzer.IsMultiStatement`), so a `;` hidden in a `--` comment, a
-   `/* */` block or a string cannot smuggle a second statement. The
+   `/* */` block or a string cannot smuggle a second statement. That check
+   takes the _narrowest_ reading of a string literal — the opposite of
+   [`Redact`](redaction#when-the-dialect-is-ambiguous-it-over-redacts), which
+   takes the widest. The two have opposite fail-safe directions: redaction
+   must never leave a literal byte in its output, while this check must never
+   miss a separator, so `'a\'; DROP TABLE t; --'` is refused rather than read
+   as one literal. A one-statement query occasionally refused is the safe
+   error here. The
    statement is then classified with the fallback parser: `SELECT` / `WITH`
    pass; `INSERT` / `UPDATE` / `DELETE` pass only with `--allow-dml`;
    DDL, `SET`, transaction control and anything unrecognised are always

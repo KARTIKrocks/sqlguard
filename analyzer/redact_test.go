@@ -24,6 +24,20 @@ func TestRedact(t *testing.T) {
 			"SELECT `from` FROM t WHERE n = ?"},
 		{"escaped quote in literal", `SELECT * FROM t WHERE s = 'O''Brien'`,
 			`SELECT * FROM t WHERE s = ?`},
+		{"backslash-escaped quote", `SELECT * FROM t WHERE s = 'O\'Brien'`,
+			`SELECT * FROM t WHERE s = ?`},
+		{"even backslashes end the literal", `SELECT * FROM t WHERE a = 'x\\' AND b = 'y'`,
+			`SELECT * FROM t WHERE a = ? AND b = ?`},
+		{"dollar-quoted string", `SELECT * FROM t WHERE body = $$a 'b' c$$`,
+			`SELECT * FROM t WHERE body = ?`},
+		{"tagged dollar-quoted string", `SELECT * FROM t WHERE body = $fn$x$fn$`,
+			`SELECT * FROM t WHERE body = ?`},
+		{"hex literal", `SELECT * FROM t WHERE h = 0xDEADBEEF`,
+			`SELECT * FROM t WHERE h = ?`},
+		{"binary literal", `SELECT * FROM t WHERE b = 0b1011`,
+			`SELECT * FROM t WHERE b = ?`},
+		{"lone dollars are not a quote", `SELECT x$$y FROM t WHERE id = 3`,
+			`SELECT x$$y FROM t WHERE id = ?`},
 		{"comment stripped", "SELECT a -- secret 'tok'\nFROM t WHERE id = 9",
 			"SELECT a  \nFROM t WHERE id = ?"},
 		{"semicolon inside literal not structural", `SELECT * FROM t WHERE s = 'a;b'`,
@@ -47,6 +61,60 @@ func TestRedactNoPII(t *testing.T) {
 		if contains(got, p) {
 			t.Errorf("Redact leaked %q: %q", p, got)
 		}
+	}
+}
+
+// TestRedactNoLeakAcrossDialectAmbiguity pins the security invariant from
+// SECURITY.md: no literal byte survives Redact (and therefore Fingerprint),
+// whichever dialect reading of a backslash escape is correct. Each of these
+// desynchronised the old single-pass lexer, which closed a literal at the
+// wrong quote and then emitted the following literal's contents verbatim.
+func TestRedactNoLeakAcrossDialectAmbiguity(t *testing.T) {
+	cases := []struct {
+		name    string
+		in      string
+		secrets []string
+	}{
+		{"mysql backslash escape",
+			`SELECT * FROM u WHERE name = 'O\'Brien' AND ssn = '123-45-6789'`,
+			[]string{"Brien", "123-45-6789"}},
+		{"postgres E-string escape",
+			`SELECT * FROM u WHERE a = E'it\'s' AND token = 'sk-live-abcdef'`,
+			[]string{"sk-live-abcdef"}},
+		{"trailing backslash under standard_conforming_strings",
+			`SELECT * FROM t WHERE path = 'C:\' AND secret = 'hunter2'`,
+			[]string{"hunter2"}},
+		{"escape ambiguity across a comment",
+			"SELECT * FROM t WHERE s = 'a\\' /* x */ AND tok = 'ghp_deadbeef'",
+			[]string{"ghp_deadbeef"}},
+		{"dollar-quoted body",
+			`SELECT * FROM u WHERE bio = $$super secret value$$`,
+			[]string{"super secret value"}},
+		{"tagged dollar-quoted body",
+			`SELECT * FROM u WHERE bio = $tag$another secret$tag$`,
+			[]string{"another secret"}},
+		{"quote inside dollar-quoted body",
+			`SELECT $$it's 'nested'$$, email FROM u WHERE e = 'a@b.c'`,
+			[]string{"nested", "a@b.c"}},
+		{"hex payload",
+			`SELECT * FROM u WHERE x = 0x4142414241424142`,
+			[]string{"4142414241424142"}},
+		{"unterminated literal",
+			`SELECT * FROM u WHERE s = 'dangling secret`,
+			[]string{"dangling secret"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, fp := Redact(c.in), Fingerprint(c.in)
+			for _, s := range c.secrets {
+				if contains(got, s) {
+					t.Errorf("Redact leaked %q\n  in:  %s\n  out: %s", s, c.in, got)
+				}
+				if contains(fp, s) {
+					t.Errorf("Fingerprint leaked %q\n  in: %s\n  fp: %s", s, c.in, fp)
+				}
+			}
+		})
 	}
 }
 
@@ -95,6 +163,14 @@ func TestIsMultiStatement(t *testing.T) {
 		{"semicolon in string literal", `SELECT * FROM t WHERE s = 'a; DROP'`, false},
 		{"comment hides stacking attempt", "SELECT 1 -- ;\nfrom t", false},
 		{"real stack after string", `SELECT 'a;b'; DELETE FROM t`, true},
+		// IsMultiStatement takes the narrowest reading of a literal, the
+		// opposite of Redact's: if "\'" closes the literal on the target
+		// server, the tail really is a second statement, so it must be
+		// refused. Over-rejecting a one-statement query is the safe error.
+		{"backslash escape must not hide a stacked statement",
+			`SELECT 'a\'; DROP TABLE users; --'`, true},
+		{"backslash escape must not hide a stacked DELETE",
+			`SELECT * FROM t WHERE s = 'x\'; DELETE FROM t; --'`, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

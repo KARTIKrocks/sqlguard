@@ -29,6 +29,55 @@ the same version in lockstep.
 - `goimports` pinned to v0.50.0 (was v0.45.0).
 - Dependabot also tracks the docs site's npm dependencies, grouped so
   Docusaurus bumps do not bury the Go module PRs.
+- `Analyzer.PrepareQuery` now redacts once instead of twice (the fingerprint
+  is folded from the already-redacted text), which offsets most of the cost
+  of the two-reading literal scan above. `analyzer.Redact` costs roughly
+  700 ns for a parameterized query and 1.3 µs for one full of literals,
+  against a ~70 µs `Analyze`; a query with no backslash in it skips the
+  second scan entirely. Benchmarks live in `analyzer/redact_bench_test.go`,
+  and `analyzer/redact_fuzz_test.go` fuzzes the lexer's index arithmetic.
+
+### Security
+
+- **Redaction leaked literal values on backslash-escaped quotes.**
+  `analyzer.Redact` honoured only the doubled-quote (`''`) escape, so a
+  literal containing `\'` — the default escape in MySQL and in PostgreSQL
+  `E'…'` strings — closed at the wrong quote. The lexer then desynchronised
+  and emitted the *following* literal's contents as if they were query
+  structure:
+
+  ```text
+  before: SELECT * FROM u WHERE a = E'it\'s' AND token = 'sk-live-abcdef'
+       →  SELECT * FROM u WHERE a = E?s?sk-live-abcdef?
+  after:  SELECT * FROM u WHERE a = E?
+  ```
+
+  This broke the invariant in `SECURITY.md` that no `Result` carries a raw
+  literal out of the process, and it applied to `Result.Fingerprint` too —
+  so leaked values could reach a metrics label. `Redact` now scans literals
+  under *both* dialect readings of a backslash escape and redacts the union
+  of the two, which cannot under-redact whichever reading the server uses.
+  Genuinely ambiguous SQL is over-redacted (structure is lost, values are
+  not); unambiguous SQL is unchanged.
+
+- **Redaction did not recognise dollar-quoted strings or radix literals.**
+  A PostgreSQL `$$body$$` / `$tag$body$tag$` string passed through
+  completely untouched, and `0x4142` redacted only its leading `0`, copying
+  the hex payload out as if it were an identifier. Both are now redacted.
+  `$1`/`$2` bind placeholders and an unterminated `$…$` run are still left
+  alone.
+
+  A double-quoted run remains an *identifier* and is preserved, which is
+  correct for ANSI/PostgreSQL and for MySQL under `ANSI_QUOTES` but not for
+  MySQL's default `sql_mode`, where `"…"` is also a string literal. This is
+  now called out in the `Redact` doc comment and in the docs.
+
+- `analyzer.IsMultiStatement`, which guards `explain` against stacked
+  statements, deliberately keeps the *narrowest* reading of a literal — the
+  opposite fail-safe direction from `Redact`. Treating `\'` as an escape
+  there would let `'a\'; DROP TABLE t; --'` read as a single literal and hide
+  the second statement. This is now pinned by tests and explained in the
+  function's doc comment.
 
 ### Fixed
 

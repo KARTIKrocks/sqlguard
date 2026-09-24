@@ -18,8 +18,12 @@ choice — see the repository's `SECURITY.md`.
 `analyzer.Redact` is a zero-dependency lexical pass over the SQL:
 
 - Comments (`--` and `/* */`) are stripped.
-- Every single-quoted string literal becomes `?`, honoring `''` escapes.
-- Every numeric literal becomes `?`.
+- Every single-quoted string literal becomes `?`, honoring both `''` and
+  `\'` escapes. _Changed in 0.3._
+- Every dollar-quoted string (`$$…$$`, `$tag$…$tag$`) becomes `?`. `$1` /
+  `$2` bind placeholders are left alone. _Added in 0.3._
+- Every numeric literal becomes `?`, including hex (`0x1F`) and binary
+  (`0b1011`) forms. _Changed in 0.3._
 - Keywords, structure, and identifiers — including `"double-quoted"` and
   `` `backtick` `` names — are preserved.
 
@@ -29,6 +33,37 @@ It never errors; unparseable input still comes out with its literals gone.
 in:  SELECT * FROM "users" WHERE email = 'a@b.c' AND age > 30 -- vip
 out: SELECT * FROM "users" WHERE email = ? AND age > ?
 ```
+
+### When the dialect is ambiguous, it over-redacts
+
+Dialects disagree about whether a backslash escapes a quote. MySQL's default
+`sql_mode` and PostgreSQL's `E'…'` strings say yes; PostgreSQL with
+`standard_conforming_strings` says the backslash is an ordinary byte. The two
+readings disagree about _where a literal ends_, and picking the wrong one
+desynchronises the lexer — it closes a literal at the wrong quote and then
+emits the next literal's contents as if they were query structure.
+
+So `Redact` scans under both readings and redacts the union. A byte that is
+inside a literal under _either_ reading is replaced:
+
+```text
+in:  SELECT * FROM t WHERE path = 'C:\' AND secret = 'hunter2'
+out: SELECT * FROM t WHERE path = ?
+```
+
+That output has lost the `AND secret =` structure, which is the deliberate
+trade: losing structure costs readability, and under-redacting leaks a value.
+SQL with no backslash in it is unambiguous, scans identically under both
+readings, and is unaffected.
+
+### One dialect gap to know about
+
+A `"double-quoted"` run is treated as an **identifier** and preserved. That is
+correct for ANSI SQL, for PostgreSQL, and for MySQL under `ANSI_QUOTES` — but
+MySQL's default `sql_mode` also accepts `"…"` as a _string literal_, and
+sqlguard does not redact it. Preserving quoted identifiers is what keeps
+ORM-generated SQL readable in a finding, so the trade is deliberate. On MySQL,
+use `'…'` or bind parameters for values you want redacted.
 
 `Result.Query` is set from `Redact` centrally in `Analyzer.Analyze`, and the
 findings built outside the rule path — `slow-query` and `n-plus-one` — go
