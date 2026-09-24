@@ -19,6 +19,12 @@
       "severity": "high"
     },
     {
+      "id": "dual-reading-lexer",
+      "rule": "analyzer/redact.go and analyzer/fallback.go scan SQL literals under more than one dialect reading, and neither scan may be collapsed to a single pass. Redact always treats $tag$...$tag$ as a literal and scans twice over the BACKSLASH question (\\' escapes in MySQL's default sql_mode and in Postgres E'...' strings, but not under standard_conforming_strings), redacting the UNION of the two readings; picking one desynchronises the lexer, which then emits the FOLLOWING literal's contents as query structure. IsMultiStatement takes the opposite side on both counts: it never honors backslash escapes, and it scans twice over the $$ question instead, refusing when ANY reading leaves a ';' outside a literal — each reading is blind to a payload the other catches (`UPDATE t AS $$ SET id = 1; DROP TABLE t` hides its ';' behind an unterminated dollar body; `SELECT $$'$$; DROP TABLE t` hides its ';' behind an unterminated ordinary literal). IsMultiStatement is explain's stacked-statement guard even though it lives in analyzer/, and the MySQL --allow-dml path runs read-write where DDL implicit-commits past the rollback, so weakening it is a security bypass, not a refactor. stripComments and blankLiterals must also agree about dollar quotes: when they disagreed, a quote inside a dollar body swallowed a real separator. Three such bugs were introduced and fixed during PR #61. Flag any change that drops a reading, makes the two lexers disagree about dollar quotes, or removes TestRedactNoLeakAcrossDialectAmbiguity or TestIsMultiStatementNeedsBothReadings.",
+      "scope": ["analyzer/redact.go", "analyzer/fallback.go"],
+      "severity": "high"
+    },
+    {
       "id": "single-analysis-core",
       "rule": "middleware.Guard (Check / CheckLatency / Observe / ResetN1 / Analyzer) is the single analysis core. Every interception point in the driver chain and every out-of-tree integration must route through one Guard. Flag any hand-rolled check/latency logic that bypasses it — it silently loses redaction, fingerprints, the parser seam, config, N+1, and dedup.",
       "scope": ["middleware/**/*.go", "integrations/**/*.go"],
