@@ -494,7 +494,7 @@ func stripComments(s string) string {
 			// $tag$ delimiter, leaving Redact's scanner unable to find the
 			// end of the literal — and therefore copying the body out as if
 			// it were query structure.
-			j, ok := scanDollarQuoted(s, i)
+			j, _, ok := scanDollarQuoted(s, i)
 			if !ok {
 				b.WriteByte(c)
 				i++
@@ -561,11 +561,26 @@ func skipBlockComment(s string, i int) int {
 // blankStringLiterals replaces the contents of every string literal with an
 // empty literal, so SQL keywords that appear inside string values cannot be
 // mistaken for clauses. Input must already be comment-free.
+//
+// Postgres dollar-quoted bodies are blanked too, keeping their delimiters.
+// stripComments has to copy such a body verbatim (a comment marker inside it
+// is data, not a comment), so without this the body's own text would reach
+// the clause regexes — and a ";" in it would make IsMultiStatement refuse a
+// perfectly ordinary single statement.
 func blankStringLiterals(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))
 	for i := 0; i < len(s); {
 		c := s[i]
+		if c == '$' {
+			if j, tagLen, ok := scanDollarQuoted(s, i); ok {
+				tag := s[i : i+tagLen]
+				b.WriteString(tag)
+				b.WriteString(tag)
+				i = j
+				continue
+			}
+		}
 		if c == '\'' || c == '"' {
 			q := c
 			b.WriteByte(q)

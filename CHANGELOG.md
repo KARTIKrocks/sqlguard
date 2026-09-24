@@ -72,6 +72,17 @@ the same version in lockstep.
   inside a dollar-quoted body is data, and treating it as a comment consumed
   the body's closing `$tag$` along with it — leaving the scanner unable to
   find the end of the literal and copying the body out as query structure.
+  `blankStringLiterals` blanks dollar-quoted bodies to match, so a `;` in a
+  body no longer makes `IsMultiStatement` refuse an ordinary single
+  statement.
+
+  Dollar-quote delimiters follow Postgres' unquoted-identifier rules, so the
+  tag scan accepts non-ASCII letters (`$é$…$é$` was previously unrecognised,
+  leaving its body in the clear) and rejects a `$` that continues an
+  identifier (`foo$tag$v$tag$` is one name, not a literal). An unterminated
+  but well-formed delimiter now runs to the end of the input rather than
+  being ignored: on a truncated query the remainder is body, and leaving it
+  unredacted would leak it.
 
   Note that where redaction is forced to over-redact, the query's
   **fingerprint changes too**, so a query whose values only sometimes contain

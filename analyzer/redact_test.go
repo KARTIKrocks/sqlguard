@@ -38,6 +38,11 @@ func TestRedact(t *testing.T) {
 			`SELECT * FROM t WHERE b = ?`},
 		{"lone dollars are not a quote", `SELECT x$$y FROM t WHERE id = 3`,
 			`SELECT x$$y FROM t WHERE id = ?`},
+		// Postgres allows "$" inside an identifier after its first character,
+		// so these dollars continue the name rather than opening a literal.
+		{"dollars inside an identifier are not a quote",
+			`SELECT foo$tag$value$tag$ FROM t WHERE id = 3`,
+			`SELECT foo$tag$value$tag$ FROM t WHERE id = ?`},
 		{"real comments still stripped around a dollar body",
 			`SELECT $$body$$ /* note */ FROM t`,
 			`SELECT ?   FROM t`},
@@ -118,6 +123,21 @@ func TestRedactNoLeakAcrossDialectAmbiguity(t *testing.T) {
 		{"trailing comment after a dollar body holding a quote",
 			`SELECT $$a'b$$ -- alice@example.com`,
 			[]string{"alice@example.com"}},
+		// Postgres dollar-quote tags follow unquoted-identifier rules, which
+		// admit non-ASCII letters, so the delimiter scan cannot be ASCII-only.
+		{"non-ascii dollar-quote tag",
+			`SELECT * FROM u WHERE bio = $é$secret$é$ AND id = 1`,
+			[]string{"secret"}},
+		{"multibyte dollar-quote tag",
+			`SELECT * FROM u WHERE bio = $日本$secret$日本$`,
+			[]string{"secret"}},
+		// A truncated query leaves the body unterminated; it is still body.
+		{"unterminated dollar-quoted body",
+			`SELECT * FROM u WHERE bio = $$dangling secret`,
+			[]string{"dangling secret"}},
+		{"unterminated tagged dollar-quoted body",
+			`SELECT * FROM u WHERE bio = $tag$dangling secret`,
+			[]string{"dangling secret"}},
 		{"hex payload",
 			`SELECT * FROM u WHERE x = 0x4142414241424142`,
 			[]string{"4142414241424142"}},
@@ -193,6 +213,13 @@ func TestIsMultiStatement(t *testing.T) {
 			`SELECT 'a\'; DROP TABLE users; --'`, true},
 		{"backslash escape must not hide a stacked DELETE",
 			`SELECT * FROM t WHERE s = 'x\'; DELETE FROM t; --'`, true},
+		// A ";" inside a dollar-quoted body is data. stripComments has to
+		// copy such a body verbatim, so blankStringLiterals must blank it or
+		// these single statements are refused as though they were stacked.
+		{"semicolon in dollar-quoted body", `SELECT $$a ; b$$`, false},
+		{"comment marker and semicolon in dollar-quoted body",
+			`SELECT $$-- ; note$$`, false},
+		{"real stack after a dollar body", `SELECT $$x$$ ; DROP TABLE t`, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

@@ -172,7 +172,7 @@ func literalSpans(s string, backslashEscapes bool) (redact, keep []span) {
 			keep = append(keep, span{i, j})
 			i = j
 		case '$':
-			if j, ok := scanDollarQuoted(s, i); ok {
+			if j, _, ok := scanDollarQuoted(s, i); ok {
 				redact = append(redact, span{i, j})
 				i = j
 				continue
@@ -210,29 +210,42 @@ func scanQuotedRun(s string, i int, backslashEscapes bool) int {
 }
 
 // scanDollarQuoted returns the index just past the Postgres dollar-quoted
-// string opening at s[i] ($$body$$ or $tag$body$tag$), and true. It reports
-// false when s[i] opens no such string: a "$1"/"$2" bind placeholder (whose
-// tag would start with a digit), a "$" that is part of an identifier, or an
-// unterminated run — which is far more likely to be two ordinary dollar signs
-// than a runaway literal, and treating it as one would swallow the rest of
-// the query.
-func scanDollarQuoted(s string, i int) (int, bool) {
+// string opening at s[i] ($$body$$ or $tag$body$tag$), the length of its
+// opening delimiter, and true.
+//
+// It reports false when s[i] opens no such string:
+//
+//   - A "$1"/"$2" bind placeholder, whose tag would start with a digit.
+//   - A "$" that continues an identifier. Postgres lets an identifier contain
+//     "$" after its first character, so in "foo$tag$v$tag$" the whole run is
+//     one identifier and the dollar signs open nothing; the preceding byte is
+//     what distinguishes that from a real delimiter.
+//
+// An unterminated but otherwise well-formed delimiter runs to the end of the
+// input rather than being rejected: on a truncated or malformed query the
+// remainder is literal body, and leaving it unredacted would leak it.
+func scanDollarQuoted(s string, i int) (end, tagLen int, ok bool) {
+	// A delimiter cannot follow an identifier byte — that "$" belongs to the
+	// identifier. Without this, "foo$tag$v$tag$" would redact to "foo?".
+	if i > 0 && isIdentByte(s[i-1]) {
+		return 0, 0, false
+	}
 	j := i + 1
 	for j < len(s) && isIdentByte(s[j]) {
 		if j == i+1 && isDigit(s[j]) {
-			return 0, false // $1 — a bind placeholder, not a tag
+			return 0, 0, false // $1 — a bind placeholder, not a tag
 		}
 		j++
 	}
 	if j >= len(s) || s[j] != '$' {
-		return 0, false
+		return 0, 0, false
 	}
 	tag := s[i : j+1] // "$" + tag + "$"
 	k := strings.Index(s[j+1:], tag)
 	if k < 0 {
-		return 0, false
+		return len(s), len(tag), true // unterminated: body runs to the end
 	}
-	return j + 1 + k + len(tag), true
+	return j + 1 + k + len(tag), len(tag), true
 }
 
 // unionSpans merges two ascending, internally non-overlapping span lists into
@@ -268,8 +281,13 @@ func unionSpans(a, b []span) []span {
 
 func isDigit(c byte) bool { return c >= '0' && c <= '9' }
 
+// isIdentByte reports whether c can appear in an unquoted SQL identifier —
+// and therefore in a Postgres dollar-quote tag, which follows the same rules
+// minus the dollar sign itself. Bytes >= 0x80 count: Postgres accepts
+// non-ASCII letters in unquoted identifiers, so $é$…$é$ is a valid delimiter
+// and its body must be redacted like any other.
 func isIdentByte(c byte) bool {
-	return c == '_' || isDigit(c) ||
+	return c == '_' || isDigit(c) || c >= 0x80 ||
 		(c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
 }
 

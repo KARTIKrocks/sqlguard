@@ -19,15 +19,22 @@ choice — see the repository's `SECURITY.md`.
 
 - Comments (`--` and `/* */`) are stripped.
 - Every single-quoted string literal becomes `?`, honoring both `''` and
-  `\'` escapes. _Changed in 0.3._
+  `\'` escapes.
 - Every dollar-quoted string (`$$…$$`, `$tag$…$tag$`) becomes `?`. `$1` /
-  `$2` bind placeholders are left alone. _Added in 0.3._
+  `$2` bind placeholders are left alone.
 - Every numeric literal becomes `?`, including hex (`0x1F`) and binary
-  (`0b1011`) forms. _Changed in 0.3._
+  (`0b1011`) forms.
 - Keywords, structure, and identifiers — including `"double-quoted"` and
   `` `backtick` `` names — are preserved.
 
 It never errors; unparseable input still comes out with its literals gone.
+
+_Changed in 0.3._ Only the `''` escape was honored before, so a literal
+containing `\'` closed at the wrong quote and the scanner then copied the
+_following_ literal's contents out as query structure. Numeric redaction
+stopped at the radix prefix, leaving `0x4142` as `?x4142` — the payload
+intact. _Added in 0.3._ Dollar-quoted strings were not recognised at all and
+passed through whole.
 
 ```text
 in:  SELECT * FROM "users" WHERE email = 'a@b.c' AND age > 30 -- vip
