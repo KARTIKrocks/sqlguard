@@ -102,22 +102,38 @@ func runScan(cmd *cobra.Command, args []string) error {
 // trimPatternSuffix accepts the `./...` spelling every Go tool takes. The scan
 // is already recursive, so `dir/...` selects exactly what `dir` does and the
 // suffix only has to be removed before the path reaches the filesystem.
+func trimPatternSuffix(path string) string {
+	return trimPatternSuffixSep(path, filepath.Separator)
+}
+
+// trimPatternSuffixSep takes the separator explicitly so both platforms'
+// behavior is testable from either one.
 //
 // The suffix must be separator-anchored: a directory really named `weird...`
 // is a legal path, and trimming it unanchored would silently scan `weird`
 // instead and report a clean exit for a tree that was never looked at.
-func trimPatternSuffix(path string) string {
-	if path != "..." && !strings.HasSuffix(path, "/...") {
+//
+// `\...` counts only where the OS separator is a backslash. The go command
+// rewrites `\` to `/` in relative arguments "as a courtesy to Windows
+// developers" (cmd/go/internal/search), so `.\...` is a spelling users do
+// type — but on Unix a backslash is an ordinary filename byte, and a directory
+// named `weird\...` there must reach the filesystem intact.
+func trimPatternSuffixSep(path string, sep rune) string {
+	if path == "..." {
+		return "."
+	}
+	trimmed, ok := strings.CutSuffix(path, "/...")
+	if !ok && sep == '\\' {
+		trimmed, ok = strings.CutSuffix(path, `\...`)
+	}
+	if !ok {
 		return path
 	}
-	trimmed := strings.TrimSuffix(path, "...")
-	switch trimmed {
-	case "":
-		return "."
-	case "/":
-		return "/"
+	// A bare root ("/...", or "C:\..." on Windows) loses its separator above.
+	if trimmed == "" || strings.HasSuffix(trimmed, ":") {
+		return trimmed + string(sep)
 	}
-	return strings.TrimSuffix(trimmed, "/")
+	return trimmed
 }
 
 func newReporter(format string) (reporter.Reporter, error) {

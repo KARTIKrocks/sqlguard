@@ -406,26 +406,52 @@ func TestScanCommand_NoUsageDumpOnIssues(t *testing.T) {
 }
 
 func TestTrimPatternSuffix(t *testing.T) {
-	cases := []struct{ in, want string }{
-		{"./...", "."},
-		{"...", "."},
-		{"/...", "/"},
-		{"./pkg/...", "./pkg"},
-		{"pkg/...", "pkg"},
-		{"/abs/pkg/...", "/abs/pkg"},
-		{".", "."},
-		{"./pkg", "./pkg"},
-		{"/abs/pkg", "/abs/pkg"},
-		{"", ""},
-		// Separator-anchored: these are directory names, not patterns.
-		{"weird...", "weird..."},
-		{"./weird...", "./weird..."},
-		{"....", "...."},
-		{"/abs/weird...", "/abs/weird..."},
+	// sep is the OS separator the call is evaluated under, so Windows
+	// behavior is covered from a Unix host and vice versa.
+	cases := []struct {
+		sep      rune
+		in, want string
+	}{
+		// Slash patterns work on every platform.
+		{'/', "./...", "."},
+		{'/', "...", "."},
+		{'/', "/...", "/"},
+		{'/', "./pkg/...", "./pkg"},
+		{'/', "pkg/...", "pkg"},
+		{'/', "/abs/pkg/...", "/abs/pkg"},
+		{'\\', "./...", "."},
+		{'\\', "...", "."},
+		{'\\', "./pkg/...", "./pkg"},
+
+		// Plain paths are untouched.
+		{'/', ".", "."},
+		{'/', "./pkg", "./pkg"},
+		{'/', "/abs/pkg", "/abs/pkg"},
+		{'/', "", ""},
+
+		// Separator-anchored: directory names, not patterns.
+		{'/', "weird...", "weird..."},
+		{'/', "./weird...", "./weird..."},
+		{'/', "....", "...."},
+		{'/', "/abs/weird...", "/abs/weird..."},
+
+		// A backslash is an ordinary filename byte on Unix, so `weird\...`
+		// and `.\...` are directory names there — but patterns on Windows.
+		{'/', `.\...`, `.\...`},
+		{'/', `weird\...`, `weird\...`},
+		{'/', `./a\...`, `./a\...`},
+		{'\\', `.\...`, "."},
+		{'\\', `.\pkg\...`, `.\pkg`},
+		{'\\', `pkg\...`, "pkg"},
+		{'\\', `weird...`, `weird...`},
+
+		// Bare roots keep their separator.
+		{'\\', `C:\...`, `C:\`},
+		{'\\', `\...`, `\`},
 	}
 	for _, c := range cases {
-		if got := trimPatternSuffix(c.in); got != c.want {
-			t.Errorf("trimPatternSuffix(%q) = %q, want %q", c.in, got, c.want)
+		if got := trimPatternSuffixSep(c.in, c.sep); got != c.want {
+			t.Errorf("trimPatternSuffixSep(%q, %q) = %q, want %q", c.in, c.sep, got, c.want)
 		}
 	}
 }
