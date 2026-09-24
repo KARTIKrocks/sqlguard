@@ -40,6 +40,13 @@ func TestValidate(t *testing.T) {
 		{"cte-wrapped update is dml", `WITH c AS (SELECT 1) UPDATE t SET a = 1`, true, "", `WITH c AS (SELECT 1) UPDATE t SET a = 1`, analyzer.StmtUpdate},
 		{"cte-wrapped insert is dml", `WITH c AS (SELECT 1) INSERT INTO t SELECT * FROM c`, true, "", `WITH c AS (SELECT 1) INSERT INTO t SELECT * FROM c`, analyzer.StmtInsert},
 		{"cte-wrapped delete refused by default", `WITH c AS (SELECT 1) DELETE FROM t WHERE id = 1`, false, "data-modifying", "", analyzer.StmtDelete},
+		// Dollar signs must not hide a separator. MySQL reads "$$" as
+		// identifier bytes, so if the separator check applied Postgres'
+		// dollar-quote semantics these would pass — and a DML EXPLAIN runs in
+		// a read-write transaction, where a smuggled DDL statement
+		// implicit-commits past the rollback.
+		{"dollar signs hiding a separator", `UPDATE t AS $$ SET id = 1; DROP TABLE t`, true, "multi-statement", "", analyzer.StmtUnknown},
+		{"tagged dollar signs hiding a separator", `UPDATE t SET a = 1 $x$ ; DROP TABLE t`, true, "multi-statement", "", analyzer.StmtUnknown},
 		{"ddl always refused", `DROP TABLE users`, true, "non-SELECT", "", analyzer.StmtOther},
 		{"set always refused", `SET search_path = x`, true, "non-SELECT", "", analyzer.StmtOther},
 		{"truncate refused", `TRUNCATE t`, true, "non-SELECT", "", analyzer.StmtOther},

@@ -213,13 +213,21 @@ func TestIsMultiStatement(t *testing.T) {
 			`SELECT 'a\'; DROP TABLE users; --'`, true},
 		{"backslash escape must not hide a stacked DELETE",
 			`SELECT * FROM t WHERE s = 'x\'; DELETE FROM t; --'`, true},
-		// A ";" inside a dollar-quoted body is data. stripComments has to
-		// copy such a body verbatim, so blankStringLiterals must blank it or
-		// these single statements are refused as though they were stacked.
-		{"semicolon in dollar-quoted body", `SELECT $$a ; b$$`, false},
+		// Dollar quotes are Postgres-only syntax, but this check guards
+		// explain on every dialect, and MySQL reads "$$" as ordinary
+		// identifier bytes. Blanking a dollar body here would erase a real
+		// MySQL separator: with --allow-dml the EXPLAIN runs in a read-write
+		// transaction, and a smuggled DDL statement implicit-commits, so
+		// rollback would not undo it. These stay refused on purpose — a
+		// Postgres-only query occasionally rejected is the affordable error.
+		{"semicolon in dollar-quoted body", `SELECT $$a ; b$$`, true},
 		{"comment marker and semicolon in dollar-quoted body",
-			`SELECT $$-- ; note$$`, false},
+			`SELECT $$-- ; note$$`, true},
 		{"real stack after a dollar body", `SELECT $$x$$ ; DROP TABLE t`, true},
+		{"dollar signs must not hide a mysql separator",
+			`UPDATE t AS $$ SET id = 1; DROP TABLE t`, true},
+		{"tagged dollar signs must not hide a mysql separator",
+			`UPDATE t SET a = 1 $x$ ; DROP TABLE t`, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

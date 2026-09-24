@@ -562,25 +562,21 @@ func skipBlockComment(s string, i int) int {
 // empty literal, so SQL keywords that appear inside string values cannot be
 // mistaken for clauses. Input must already be comment-free.
 //
-// Postgres dollar-quoted bodies are blanked too, keeping their delimiters.
-// stripComments has to copy such a body verbatim (a comment marker inside it
-// is data, not a comment), so without this the body's own text would reach
-// the clause regexes — and a ";" in it would make IsMultiStatement refuse a
-// perfectly ordinary single statement.
+// It deliberately knows nothing about Postgres dollar quotes, and must not
+// learn: IsMultiStatement is built on this function and guards explain
+// against stacked statements on *any* dialect. MySQL reads "$$" as ordinary
+// identifier bytes, so applying Postgres' dollar-quote semantics here would
+// blank a MySQL separator out of existence — "UPDATE t AS $$ SET id = 1;
+// DROP TABLE t" would pass the check and reach EXPLAIN, inside the
+// read-write transaction that --allow-dml uses, with the ";" intact. Hiding
+// a separator is the one failure this function cannot afford; keeping a
+// dollar body's text visible only costs a Postgres-only query the occasional
+// false rejection.
 func blankStringLiterals(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))
 	for i := 0; i < len(s); {
 		c := s[i]
-		if c == '$' {
-			if j, tagLen, ok := scanDollarQuoted(s, i); ok {
-				tag := s[i : i+tagLen]
-				b.WriteString(tag)
-				b.WriteString(tag)
-				i = j
-				continue
-			}
-		}
 		if c == '\'' || c == '"' {
 			q := c
 			b.WriteByte(q)

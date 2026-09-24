@@ -72,9 +72,16 @@ the same version in lockstep.
   inside a dollar-quoted body is data, and treating it as a comment consumed
   the body's closing `$tag$` along with it — leaving the scanner unable to
   find the end of the literal and copying the body out as query structure.
-  `blankStringLiterals` blanks dollar-quoted bodies to match, so a `;` in a
-  body no longer makes `IsMultiStatement` refuse an ordinary single
-  statement.
+  `blankStringLiterals`, which `IsMultiStatement` is built on, deliberately
+  does **not** learn about dollar quotes. That check guards `explain` on
+  every dialect, and MySQL reads `$$` as ordinary identifier bytes, so
+  applying Postgres' semantics there would blank a real MySQL separator out
+  of existence — `UPDATE t AS $$ SET id = 1; DROP TABLE t` would reach
+  `EXPLAIN` with its `;` intact, inside the read-write transaction
+  `--allow-dml` uses, where a DDL statement implicit-commits past the
+  rollback. The cost is that a Postgres query with a `;` inside a
+  dollar-quoted body is refused by `explain`; hiding a separator is the one
+  error that check cannot afford.
 
   Dollar-quote delimiters follow Postgres' unquoted-identifier rules, so the
   tag scan accepts non-ASCII letters (`$é$…$é$` was previously unrecognised,

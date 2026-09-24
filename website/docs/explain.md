@@ -95,8 +95,11 @@ not rely on parameterization:
    takes the widest. The two have opposite fail-safe directions: redaction
    must never leave a literal byte in its output, while this check must never
    miss a separator, so `'a\'; DROP TABLE t; --'` is refused rather than read
-   as one literal. A one-statement query occasionally refused is the safe
-   error here. The
+   as one literal. For the same reason the check is dialect-agnostic and does
+   not treat `$$…$$` as a string: dollar quoting is Postgres-only, MySQL reads
+   `$$` as ordinary identifier bytes, and honouring it here would blank a real
+   MySQL separator — so `SELECT $$a ; b$$` is refused too. A one-statement
+   query occasionally refused is the safe error here. The
    statement is then classified with the fallback parser: `SELECT` / `WITH`
    pass; `INSERT` / `UPDATE` / `DELETE` pass only with `--allow-dml`;
    DDL, `SET`, transaction control and anything unrecognised are always
