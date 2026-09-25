@@ -39,6 +39,16 @@ can be overridden per project.
 | `no-index-used` | WARNING | EXPLAIN (mysql) | Empty `key` **and** empty `possible_keys` |
 | `filesort` | INFO | EXPLAIN (mysql) | `Using filesort` in `Extra` |
 
+_Changed in 0.3._ Every rule in this table is addressable by name in
+[`.sqlguard.yml`](configuration) — `disable`, `only`, `severity` and
+`settings` all work the same for a runtime or plan rule as for a statement
+rule. In 0.2 only the 14 statement rules were: naming any of the other seven
+warned with `unknown rule`, and failed under `strict: true`.
+
+The runtime and plan rules are not evaluated against parsed SQL — middleware
+derives them from latency and fingerprint counts, and `explain` from the
+database's own plan — so they never fire during a static `sqlguard scan`.
+
 "static, runtime" rules read the normalized `Statement` a [parser](parsers)
 produces; they never look at raw SQL. The runtime and EXPLAIN rules are
 built into the [middleware](middleware) and the [EXPLAIN analyzer](explain)

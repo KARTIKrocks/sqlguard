@@ -34,6 +34,12 @@ type Analyzer struct {
 	rules    []boundRule
 	parser   Parser
 	severity map[string]Severity
+	// disabled is the resolved skip decision for every registered rule,
+	// including those this Analyzer does not run — see RuleEnabled.
+	disabled map[string]bool
+	// settings holds per-rule tunables for the same audience; the statement
+	// rules have theirs baked in by their factory at construction.
+	settings map[string]Settings
 	// rawQuery, when true, leaves Result.Query unredacted. Default is false
 	// (redact): the safe default for a tool whose findings flow into logs.
 	rawQuery bool
@@ -104,8 +110,15 @@ func Default() *Analyzer {
 // without analyzer ever importing config or YAML.
 func DefaultWithProfile(p Profile) *Analyzer {
 	var bound []boundRule
+	disabled := make(map[string]bool, len(specs()))
 	for _, spec := range specs() {
 		if p.skip(spec.Name) {
+			disabled[spec.Name] = true
+			continue
+		}
+		// Registered for addressability only — middleware and explain build
+		// these findings themselves and consult the decisions below.
+		if !spec.Evaluated() {
 			continue
 		}
 		bound = append(bound, boundRule{
@@ -120,8 +133,46 @@ func DefaultWithProfile(p Profile) *Analyzer {
 		sev = make(map[string]Severity, len(p.Severity))
 		maps.Copy(sev, p.Severity)
 	}
-	return &Analyzer{rules: bound, parser: NewFallbackParser(), severity: sev, rawQuery: p.RawQuery}
+	var settings map[string]Settings
+	if len(p.Settings) > 0 {
+		settings = make(map[string]Settings, len(p.Settings))
+		maps.Copy(settings, p.Settings)
+	}
+	return &Analyzer{
+		rules:    bound,
+		parser:   NewFallbackParser(),
+		severity: sev,
+		disabled: disabled,
+		settings: settings,
+		rawQuery: p.RawQuery,
+	}
 }
+
+// RuleEnabled reports whether the active profile leaves the named rule on. It
+// answers for every registered rule, including the ones the Analyzer does not
+// evaluate: middleware asks before emitting `slow-query` or `n-plus-one`, and
+// explain asks before emitting a plan finding, so `disable` and `only` mean
+// the same thing across all three surfaces.
+//
+// An unregistered name is reported as enabled: an Analyzer built with New has
+// no profile, and a caller's own rule is not the profile's to turn off.
+func (a *Analyzer) RuleEnabled(name string) bool { return !a.disabled[name] }
+
+// RuleSeverity returns the severity to report for name, applying a profile
+// override to def when one is set.
+func (a *Analyzer) RuleSeverity(name string, def Severity) Severity {
+	if a.severity != nil {
+		if s, has := a.severity[name]; has {
+			return s
+		}
+	}
+	return def
+}
+
+// RuleSettings returns the profile settings for name, or nil when none were
+// configured. Settings.Int / .Duration treat a nil Settings as "use the
+// default", so a caller can read straight through without a nil check.
+func (a *Analyzer) RuleSettings(name string) Settings { return a.settings[name] }
 
 // Analyze parses the query once and runs all rules against it. If the
 // configured parser returns an error, it degrades to the FallbackParser so

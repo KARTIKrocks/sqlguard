@@ -23,6 +23,30 @@ the same version in lockstep.
 
 ### Changed
 
+- **Every documented rule is now addressable in `.sqlguard.yml`.** The rules
+  reference lists 21 rules, but only the 14 statement rules were registered:
+  naming `slow-query`, `n-plus-one`, `seq-scan`, `high-cost`,
+  `full-table-scan`, `no-index-used` or `filesort` under `disable`, `only`,
+  `severity` or `settings` warned with `unknown rule`, and failed outright
+  under `strict: true`. All seven are registered now, and the profile reaches
+  the runtime findings in middleware and the plan findings in `explain`
+  exactly as it reaches a statement rule. They are still never evaluated
+  against parsed SQL, so they do not fire during `sqlguard scan`.
+- **Breaking (config): the slow-query threshold moved** from the top-level
+  `slow-query.threshold` key to `rules.settings.slow-query.threshold`, so
+  every per-rule tunable lives in one place. `Config.SlowQueryThreshold` and
+  the `SlowQueryConfig` type are gone with it. An explicit
+  `WithSlowQueryThreshold` in Go still wins over the file.
+- **`explain` now honors `rules:` config.** It previously ignored it by
+  design, which is what its docs said. A `severity` override also beats
+  `seq-scan`'s row-count-derived severity.
+- **N+1 detection can be enabled from the config file.** Setting both
+  `rules.settings.n-plus-one.threshold` and `.window` turns it on; it was
+  previously reachable only from Go via `WithN1Detection`, which still takes
+  precedence.
+- A duration in `rules.settings` that does not parse is now reported instead
+  of being silently replaced by the built-in default.
+
 - README restructured as a landing page: logo, "Why sqlguard?" comparison,
   quick start, and a guide index pointing at the docs site. The deep
   per-feature sections moved to the site.

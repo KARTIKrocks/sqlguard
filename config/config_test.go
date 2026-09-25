@@ -30,8 +30,8 @@ rules:
   settings:
     leading-wildcard:
       min-length: 4
-slow-query:
-  threshold: 350ms
+    slow-query:
+      threshold: 350ms
 `)
 	c, err := Load(p)
 	if err != nil {
@@ -55,9 +55,8 @@ slow-query:
 		t.Error("min-length setting not carried into profile")
 	}
 
-	d, ok, err := c.SlowQueryThreshold()
-	if err != nil || !ok || d != 350*time.Millisecond {
-		t.Errorf("SlowQueryThreshold = %v, %v, %v; want 350ms,true,nil", d, ok, err)
+	if d := prof.Settings["slow-query"].Duration("threshold", 0); d != 350*time.Millisecond {
+		t.Errorf("slow-query threshold = %v, want 350ms", d)
 	}
 
 	// End-to-end: the built analyzer respects the profile.
@@ -194,4 +193,73 @@ func TestExcludeMatcher(t *testing.T) {
 	if none != nil {
 		t.Error("no patterns should yield a nil matcher")
 	}
+}
+
+// TestProfile_AcceptsNonEvaluatedRules pins the bug this fixes: `slow-query`,
+// `n-plus-one` and the five plan rules are documented in the same reference
+// table as the statement rules, but were not registered, so naming any of
+// them warned in lenient mode and failed outright under `strict: true`.
+func TestProfile_AcceptsNonEvaluatedRules(t *testing.T) {
+	names := []string{
+		"slow-query", "n-plus-one",
+		"seq-scan", "high-cost", "full-table-scan", "no-index-used", "filesort",
+	}
+	for _, name := range names {
+		t.Run(name, func(t *testing.T) {
+			c := &Config{
+				Strict: true,
+				Rules: RulesConfig{
+					Disable:  []string{name},
+					Severity: map[string]string{name: "critical"},
+				},
+			}
+			p, err := c.Profile()
+			if err != nil {
+				t.Fatalf("strict config naming %q failed: %v", name, err)
+			}
+			if !p.Disabled[name] {
+				t.Errorf("%q not carried into Profile.Disabled", name)
+			}
+			if len(c.Warnings()) != 0 {
+				t.Errorf("unexpected warnings: %v", c.Warnings())
+			}
+		})
+	}
+}
+
+// TestProfile_ValidatesDurationSettings guards a trap introduced by moving the
+// threshold into settings: analyzer.Settings.Duration falls back to the
+// caller's default when a value does not parse, so without this check a typo
+// would silently leave the built-in 200ms in place.
+func TestProfile_ValidatesDurationSettings(t *testing.T) {
+	t.Run("strict fails", func(t *testing.T) {
+		c := &Config{Strict: true, Rules: RulesConfig{Settings: map[string]map[string]any{
+			"slow-query": {"threshold": "200mss"},
+		}}}
+		if _, err := c.Profile(); err == nil {
+			t.Fatal("expected an error for an unparseable duration")
+		}
+	})
+
+	t.Run("lenient warns", func(t *testing.T) {
+		c := &Config{Rules: RulesConfig{Settings: map[string]map[string]any{
+			"n-plus-one": {"window": "1minute"},
+		}}}
+		if _, err := c.Profile(); err != nil {
+			t.Fatalf("lenient mode should not fail: %v", err)
+		}
+		if len(c.Warnings()) != 1 {
+			t.Errorf("expected one warning, got %v", c.Warnings())
+		}
+	})
+
+	t.Run("valid duration and bare number pass", func(t *testing.T) {
+		c := &Config{Strict: true, Rules: RulesConfig{Settings: map[string]map[string]any{
+			"slow-query": {"threshold": "1s"},
+			"n-plus-one": {"window": 500, "threshold": 10},
+		}}}
+		if _, err := c.Profile(); err != nil {
+			t.Fatalf("valid settings rejected: %v", err)
+		}
+	})
 }

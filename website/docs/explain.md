@@ -33,7 +33,7 @@ sqlguard explain --db "…" --format json "SELECT …"
 | `--dialect postgres\|mysql` | `postgres` | Which planner to talk to. MariaDB works through `mysql`. |
 | `--format console\|json` | `console` | Output shape. |
 | `--allow-dml` | off | Permit `INSERT` / `UPDATE` / `DELETE`. Still planned only, still rolled back. |
-| `--config`, `--no-config` | — | Persistent flags; `explain` findings are not affected by `rules:` config. |
+| `--config`, `--no-config` | — | Persistent flags. `rules:` config applies — see below. |
 
 The whole command runs under a 30-second timeout, including the initial
 connectivity check. Exit code is **1** when the plan has issues, **0**
@@ -70,6 +70,20 @@ there is no log sink to protect, and you need to recognise your own query.
 | `full-table-scan` | mysql | A row with access `type = ALL`. |
 | `no-index-used` | mysql | A row with empty `key` **and** empty `possible_keys`. |
 | `filesort` | mysql | `Using filesort` in `Extra`. |
+
+_Changed in 0.3._ These five are ordinary rule names now, so
+[`.sqlguard.yml`](configuration) can turn one off or re-severity it:
+
+```yaml
+rules:
+  disable: [high-cost]
+  severity:
+    seq-scan: critical
+```
+
+In 0.2 `explain` ignored `rules:` entirely, and naming a plan rule in a config
+was an `unknown rule` warning — a hard error under `strict: true`. A
+`severity` override also wins over `seq-scan`'s row-count-derived severity.
 
 Postgres plans are requested as `EXPLAIN (FORMAT JSON)` and walked
 recursively, so nested scans inside joins and CTEs are found. MySQL plans

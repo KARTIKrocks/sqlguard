@@ -81,8 +81,17 @@ func (s Settings) Duration(key string, def time.Duration) time.Duration {
 type RuleSpec struct {
 	Name            string
 	DefaultSeverity Severity
-	Factory         func(Settings) Rule
+	// Factory builds the rule for the statement path. It is nil for findings
+	// the Analyzer does not produce itself — middleware's `slow-query` and
+	// `n-plus-one`, and the plan rules `explain` derives from a query plan.
+	// Those register so they are addressable by name like any other rule;
+	// their owners ask the Analyzer for the resolved decision before they
+	// emit. A nil Factory is never called.
+	Factory func(Settings) Rule
 }
+
+// Evaluated reports whether the Analyzer builds and runs this rule itself.
+func (s RuleSpec) Evaluated() bool { return s.Factory != nil }
 
 var (
 	registryMu sync.RWMutex

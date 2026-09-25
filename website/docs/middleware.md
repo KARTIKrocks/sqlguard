@@ -49,11 +49,11 @@ Every option is a `middleware.Option`. The same set is accepted by every
 
 | Option | Default | Effect |
 | --- | --- | --- |
-| `WithSlowQueryThreshold(d time.Duration)` | `200ms` | Report `slow-query` when a successful query's driver-measured latency reaches `d`. |
+| `WithSlowQueryThreshold(d time.Duration)` | `200ms` | Report `slow-query` when a successful query's driver-measured latency reaches `d`. Takes precedence over `rules.settings.slow-query.threshold` _0.3+_. |
 | `WithReporter(r reporter.Reporter)` | `reporter.NewConsoleReporter()` (stderr) | Where findings go. `reporter.NewJSONReporter()` is built in; implement `Report([]analyzer.Result)` for anything else. |
 | `WithAnalyzer(a *analyzer.Analyzer)` | `analyzer.Default()` | Replace the rule set — typically `analyzer.DefaultWithProfile(...)` from config, or an analyzer built `WithRawQuery()`. |
 | `WithParser(p analyzer.Parser)` | `analyzer.FallbackParser` | Swap in a real grammar from [`parsers/`](parsers). Applied to whichever analyzer is in use. |
-| `WithN1Detection(threshold int, window time.Duration)` | off | Report `n-plus-one` when the same query fingerprint runs `threshold` times within `window`. See [N+1 detection](n-plus-one). |
+| `WithN1Detection(threshold int, window time.Duration)` | off | Report `n-plus-one` when the same query fingerprint runs `threshold` times within `window`. Takes precedence over `rules.settings.n-plus-one` _0.3+_. See [N+1 detection](n-plus-one). |
 | `WithFindingDedup(window time.Duration)` | `1m` | Report each (rule, fingerprint) pair at most once per window. `0` reports every occurrence. See [Noise control](noise-control). |
 | `WithAnalysisCacheSize(n int)` | `1024` | Memoize static analysis per exact query string in an LRU of `n` entries. `0` disables the cache. |
 

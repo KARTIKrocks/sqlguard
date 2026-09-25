@@ -29,12 +29,11 @@ var ConfigFileNames = []string{".sqlguard.yml", ".sqlguard.yaml"}
 // forward compatibility: older binaries reading a newer config degrade with
 // warnings rather than failing, unless Strict is set.
 type Config struct {
-	Version   int             `yaml:"version"`
-	Strict    bool            `yaml:"strict"`
-	Rules     RulesConfig     `yaml:"rules"`
-	SlowQuery SlowQueryConfig `yaml:"slow-query"`
-	Dedup     DedupConfig     `yaml:"dedup"`
-	Scan      ScanConfig      `yaml:"scan"`
+	Version int         `yaml:"version"`
+	Strict  bool        `yaml:"strict"`
+	Rules   RulesConfig `yaml:"rules"`
+	Dedup   DedupConfig `yaml:"dedup"`
+	Scan    ScanConfig  `yaml:"scan"`
 	// Redact controls Result.Query literal redaction. Pointer so an unset
 	// key means "use the safe default" (redact). Set `redact: false` only
 	// when the query text is trusted (local debugging).
@@ -55,12 +54,6 @@ type RulesConfig struct {
 	Severity map[string]string `yaml:"severity"`
 	// Settings holds per-rule tunables, e.g. leading-wildcard.min-length.
 	Settings map[string]map[string]any `yaml:"settings"`
-}
-
-// SlowQueryConfig configures the middleware slow-query threshold.
-type SlowQueryConfig struct {
-	// Threshold is a Go duration string, e.g. "200ms".
-	Threshold string `yaml:"threshold"`
 }
 
 // DedupConfig configures runtime suppression of repeated static findings.
@@ -206,14 +199,39 @@ func (c *Config) Profile() (analyzer.Profile, error) {
 		}
 		p.Only[name] = true
 	}
-	for name, sevStr := range c.Rules.Severity {
+	if err := applySeverities(c.Rules.Severity, &p, checkName, warn); err != nil {
+		return p, err
+	}
+	for name, kv := range c.Rules.Settings {
 		if err := checkName(name); err != nil {
 			return p, err
+		}
+		if err := checkDurationSettings(name, kv, warn); err != nil {
+			return p, err
+		}
+		p.Settings[name] = analyzer.Settings(kv)
+	}
+	return p, nil
+}
+
+// applySeverities resolves the `rules.severity` map onto the profile. A
+// severity of "off" disables the rule rather than setting one, which is what
+// makes `severity: {slow-query: off}` equivalent to listing it under
+// `disable`.
+func applySeverities(
+	sevs map[string]string,
+	p *analyzer.Profile,
+	checkName func(string) error,
+	warn func(string, ...any) error,
+) error {
+	for name, sevStr := range sevs {
+		if err := checkName(name); err != nil {
+			return err
 		}
 		sev, off, ok := parseSeverity(sevStr)
 		if !ok {
 			if err := warn("rule %q: invalid severity %q", name, sevStr); err != nil {
-				return p, err
+				return err
 			}
 			continue
 		}
@@ -223,13 +241,37 @@ func (c *Config) Profile() (analyzer.Profile, error) {
 		}
 		p.Severity[name] = sev
 	}
-	for name, kv := range c.Rules.Settings {
-		if err := checkName(name); err != nil {
-			return p, err
+	return nil
+}
+
+// durationSettings names the per-rule settings parsed as Go durations, so a
+// malformed value is reported rather than silently replaced by a default.
+var durationSettings = map[string][]string{
+	"slow-query": {"threshold"},
+	"n-plus-one": {"window"},
+}
+
+// checkDurationSettings reports a duration setting that will not parse.
+// analyzer.Settings.Duration falls back to the caller's default on a bad
+// value, so without this a typo would quietly leave the built-in threshold in
+// place rather than the one the file asked for.
+func checkDurationSettings(rule string, kv map[string]any, warn func(string, ...any) error) error {
+	for _, key := range durationSettings[rule] {
+		v, present := kv[key]
+		if !present {
+			continue
 		}
-		p.Settings[name] = analyzer.Settings(kv)
+		str, isStr := v.(string)
+		if !isStr {
+			continue // a bare number is milliseconds; Settings handles it
+		}
+		if _, err := time.ParseDuration(strings.TrimSpace(str)); err != nil {
+			if err := warn("rule %q: setting %q: invalid duration %q", rule, key, str); err != nil {
+				return err
+			}
+		}
 	}
-	return p, nil
+	return nil
 }
 
 // rawQuery reports whether Result.Query redaction is disabled. Redaction is
@@ -246,20 +288,6 @@ func (c *Config) Analyzer() (*analyzer.Analyzer, error) {
 		return nil, err
 	}
 	return analyzer.DefaultWithProfile(p), nil
-}
-
-// SlowQueryThreshold returns the configured slow-query threshold. ok is false
-// when unset, in which case the caller keeps its own default.
-func (c *Config) SlowQueryThreshold() (d time.Duration, ok bool, err error) {
-	s := strings.TrimSpace(c.SlowQuery.Threshold)
-	if s == "" {
-		return 0, false, nil
-	}
-	d, err = time.ParseDuration(s)
-	if err != nil {
-		return 0, false, fmt.Errorf("sqlguard config: slow-query.threshold %q: %w", s, err)
-	}
-	return d, true, nil
 }
 
 // DedupWindow returns the configured static-finding dedup window. ok is false

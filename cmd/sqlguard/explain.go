@@ -56,7 +56,17 @@ func runExplain(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = db.Close() }()
 
-	var explainOpts []explain.Option
+	cfg, err := resolveConfig(".")
+	if err != nil {
+		return err
+	}
+	a, err := cfg.Analyzer()
+	if err != nil {
+		return err
+	}
+	printConfigWarnings(cfg)
+
+	explainOpts := []explain.Option{explain.WithAnalyzer(a)}
 	if explainAllowDML {
 		explainOpts = append(explainOpts, explain.WithAllowDML())
 	}

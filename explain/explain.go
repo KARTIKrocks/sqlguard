@@ -20,6 +20,11 @@ type PlanAnalyzer struct {
 	db       *sql.DB
 	dialect  string // "postgres" or "mysql"
 	allowDML bool
+	// rules carries the resolved rule profile. The plan rules are registered
+	// in the analyzer purely to be addressable, so `disable`, `only` and
+	// `severity` reach them exactly as they reach a statement rule. Nil means
+	// no configuration: every plan rule fires at its built-in severity.
+	rules *analyzer.Analyzer
 }
 
 // Option configures a PlanAnalyzer.
@@ -33,6 +38,17 @@ type Option func(*PlanAnalyzer)
 // so nothing is committed regardless.
 func WithAllowDML() Option {
 	return func(p *PlanAnalyzer) { p.allowDML = true }
+}
+
+// WithAnalyzer supplies the configured analyzer whose rule profile governs
+// which plan findings are reported and at what severity. The CLI passes the
+// one built from .sqlguard.yml; a library caller can pass
+// analyzer.DefaultWithProfile(p).
+//
+// `explain` does not run the statement rules — it only borrows the profile
+// decisions, so the same `disable: [seq-scan]` works on every surface.
+func WithAnalyzer(a *analyzer.Analyzer) Option {
+	return func(p *PlanAnalyzer) { p.rules = a }
 }
 
 // New creates a PlanAnalyzer for the given database connection.
@@ -79,12 +95,34 @@ func (p *PlanAnalyzer) Analyze(ctx context.Context, query string) (*Result, erro
 		return nil, fmt.Errorf("explain: unsupported dialect %q", p.dialect)
 	}
 	if res != nil {
+		res.Issues = p.applyProfile(res.Issues)
 		fp := analyzer.Fingerprint(query)
 		for i := range res.Issues {
 			res.Issues[i].Fingerprint = fp
 		}
 	}
 	return res, err
+}
+
+// applyProfile drops findings the profile disabled and applies any severity
+// override. It runs once over the collected issues rather than at each site
+// that builds one, so a plan rule added later cannot forget the check.
+//
+// A severity override wins over a computed severity: `seq-scan` picks INFO or
+// WARNING from the estimated row count, and an explicit setting outranks both.
+func (p *PlanAnalyzer) applyProfile(issues []analyzer.Result) []analyzer.Result {
+	if p.rules == nil || len(issues) == 0 {
+		return issues
+	}
+	kept := issues[:0]
+	for _, r := range issues {
+		if !p.rules.RuleEnabled(r.RuleName) {
+			continue
+		}
+		r.Severity = p.rules.RuleSeverity(r.RuleName, r.Severity)
+		kept = append(kept, r)
+	}
+	return kept
 }
 
 // validate enforces the EXPLAIN safety policy and returns the single,

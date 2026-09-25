@@ -56,14 +56,15 @@ rules:
       max-length: 100     # flag IN (...) with more elements than this
     large-offset:
       threshold: 1000     # flag a literal OFFSET above this
+    slow-query:
+      threshold: 200ms    # runtime: flag a query at or above this latency
+    n-plus-one:
+      threshold: 10       # runtime: this many of the same fingerprint...
+      window: 1m          # ...within this window
 
 # Redact literal values out of Result.Query. ON by default. Set false ONLY
 # for local debugging where the query text is trusted.
 redact: true
-
-# Runtime middleware: slow-query threshold. Go duration string.
-slow-query:
-  threshold: 200ms
 
 # Runtime middleware: report each (rule, fingerprint) at most once per
 # window. "0" disables and reports every occurrence.
@@ -81,16 +82,23 @@ scan:
 | --- | --- | --- |
 | `version` | all | Reserved for forward compatibility; always `1` today. |
 | `strict` | all | Make unknown keys, unknown rule names and bad severities fatal instead of warnings. |
-| `rules.disable` | static + runtime rules | Rule names to turn off. |
-| `rules.only` | static + runtime rules | Whitelist. When non-empty, only these run and `disable` is ignored. |
-| `rules.severity` | static + runtime rules | `info`, `warning`, `critical`, or `off`. |
-| `rules.settings` | rules with tunables | `leading-wildcard.min-length`, `in-list-too-large.max-length`, `large-offset.threshold`. See [Rules](rules). |
+| `rules.disable` | every rule | Rule names to turn off. |
+| `rules.only` | every rule | Whitelist. When non-empty, only these run and `disable` is ignored. |
+| `rules.severity` | every rule | `info`, `warning`, `critical`, or `off`. |
+| `rules.settings` | rules with tunables | `leading-wildcard.min-length`, `in-list-too-large.max-length`, `large-offset.threshold`, `slow-query.threshold`, `n-plus-one.threshold` / `.window`. See [Rules](rules). |
 | `redact` | all | `false` keeps raw literals in `Result.Query`. See [Redaction](redaction). |
-| `slow-query.threshold` | middleware, integrations | Go duration (`200ms`, `1s`). Equivalent to `WithSlowQueryThreshold`. |
 | `dedup.window` | middleware, integrations | Go duration or `"0"`. Equivalent to `WithFindingDedup`. |
 | `scan.exclude-paths` | scanner | Regexes matched against the scanned file path. |
 
 Quote `"off"` — unquoted `off` is a YAML boolean.
+
+_Changed in 0.3._ "Every rule" now means every rule. In 0.2 only the 14
+statement rules were addressable: naming `slow-query`, `n-plus-one` or a plan
+rule (`seq-scan`, `high-cost`, `full-table-scan`, `no-index-used`, `filesort`)
+warned with `unknown rule`, and failed outright under `strict: true`, even
+though the [rules reference](rules) listed them. The slow-query threshold also
+moved from a top-level `slow-query.threshold` key to
+`rules.settings.slow-query.threshold`, so every tunable lives in one place.
 
 ## Lenient by default
 
@@ -99,9 +107,12 @@ stderr by the CLI as `sqlguard: config warning: …`, so a config that names
 a rule added in a newer release still loads on an older binary. Set
 `strict: true` when you want CI to fail on a typo.
 
-One thing people look for and do not find: N+1 detection has no config key.
-Its `threshold` and `window` are workload-specific, so they are set in code
-with `WithN1Detection` (see [N+1 detection](n-plus-one)).
+_Added in 0.3._ N+1 detection can be turned on from the file. Setting both
+`rules.settings.n-plus-one.threshold` and `.window` enables it; previously it
+was reachable only from Go with `WithN1Detection`, which remains the way to
+set it in code. An explicit Go option wins over the file for both N+1 and
+`slow-query.threshold`, so a deliberate call is never overridden by a config
+that happens to be on disk.
 
 ## Loading it from Go
 
