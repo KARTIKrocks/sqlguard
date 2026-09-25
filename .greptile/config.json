@@ -62,7 +62,7 @@
     },
     {
       "id": "parser-never-breaks-query-path",
-      "rule": "A pluggable SQL parser (parsers/pgparser, parsers/mysqlparser) or analyzer.Parser implementation must never let a parse failure propagate as an error that breaks the caller's query path. On a parse failure, degrade to the FallbackParser's best-effort Statement (Exact=false) instead. The dialect parsers deliberately keep MaxInListLen/ImplicitCommaJoin/CartesianJoin as fallback heuristics rather than deriving them from the AST — that is a documented carve-out, not a bug to fix.",
+      "rule": "A pluggable SQL parser (parsers/pgparser, parsers/mysqlparser) or analyzer.Parser implementation must never let a parse failure propagate as an error that breaks the caller's query path. On a parse failure, degrade to the FallbackParser's best-effort Statement (Exact=false) instead — that degradation lives in analyzer.Analyze. A dialect parser may also only REMOVE findings, never add one: opting into a real grammar is sold as trading false positives away, and the reporting surface is identical so nothing would warn. When a parser learns a statement kind the zero-dependency fallback has to learn it too (detectKind and insertColumnsListed are the pair to check), and a new structural field read by a rule needs a corpus row in TestParser_NeverAddsFindingTheFallbackDoesNot. The dialect parsers deliberately keep MaxInListLen/ImplicitCommaJoin/CartesianJoin as fallback heuristics rather than deriving them from the AST — that is a documented carve-out, not a bug to fix.",
       "scope": ["parsers/**/*.go", "analyzer/**/*.go"],
       "severity": "high"
     },

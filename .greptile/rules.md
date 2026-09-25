@@ -123,9 +123,9 @@ default one-minute dedup window, which is why the bug went unnoticed. It is
 the N+1 counter, which is not deduped: `WithN1Detection(10, …)` fired at five
 real queries on MySQL, so every configured threshold was silently halved.
 
-The fix is one shape, applied at every interception point in `driver.go`: call
-the base, then `analyzeExecuted`, which returns without analyzing when the
-answer is `ErrSkip` or `ErrBadConn`. Two consequences are deliberate. Analysis
+The fix lands in #67, as one shape applied at every interception point in
+`driver.go`: call the base, then `analyzeExecuted`, which returns without
+analyzing when the answer is `ErrSkip` or `ErrBadConn`. Two consequences are deliberate. Analysis
 happens after execution, which is fine because nothing consumes findings
 before the query runs; and the latency window is read before the rules run, so
 analysis time cannot push a query past the slow-query threshold. Argument
@@ -136,7 +136,7 @@ conversion also moved ahead of analysis, so a call rejected with
 `Guard.Observe` (check, then time) survives for interception points that are
 only ever told a query ran: the out-of-tree integrations. Nothing in
 `driver.go` is in that position, so restoring it there reintroduces the bug.
-The regression tests are fake drivers rather than assertions on internals —
+Its regression tests are fake drivers rather than assertions on internals —
 `fakeErrSkipDriver` and `fakeBadConnDriver` in
 `middleware/driver_fallback_test.go` — and each fails against the unfixed code
 with an exact count (2, 3, or a tripped N+1 threshold).
