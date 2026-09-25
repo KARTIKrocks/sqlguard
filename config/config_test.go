@@ -352,6 +352,49 @@ func TestProfile_OnlySelectingNothingRunnableWarns(t *testing.T) {
 		})
 	}
 
+	// A name the whitelist selects and `disable` (or `severity: off`) then
+	// takes away again leaves the scanner with nothing, but reads like a
+	// perfectly ordinary narrowing config. Testing the list against the
+	// registry could not see it; asking the profile whether any rule survives
+	// can.
+	t.Run("only and disable cancelling out", func(t *testing.T) {
+		c := &Config{Rules: RulesConfig{
+			Only:    []string{"select-star"},
+			Disable: []string{"select-star"},
+		}}
+		if _, err := c.Profile(); err != nil {
+			t.Fatalf("lenient mode should not fail: %v", err)
+		}
+		if len(c.Warnings()) != 1 || !strings.Contains(c.Warnings()[0], "nothing will be scanned") {
+			t.Errorf("expected the nothing-scanned warning, got %v", c.Warnings())
+		}
+	})
+
+	t.Run("only and severity off cancelling out", func(t *testing.T) {
+		c := &Config{Rules: RulesConfig{
+			Only:     []string{"select-star"},
+			Severity: map[string]string{"select-star": "off"},
+		}}
+		if _, err := c.Profile(); err != nil {
+			t.Fatalf("lenient mode should not fail: %v", err)
+		}
+		if len(c.Warnings()) != 1 || !strings.Contains(c.Warnings()[0], "nothing will be scanned") {
+			t.Errorf("expected the nothing-scanned warning, got %v", c.Warnings())
+		}
+	})
+
+	// Disabling everything without an `only:` list is a deliberate setup —
+	// using sqlguard purely for its runtime findings — and must stay quiet.
+	t.Run("disabling every rule without only stays quiet", func(t *testing.T) {
+		c := &Config{Strict: true, Rules: RulesConfig{Disable: analyzer.EvaluatedRuleNames()}}
+		if _, err := c.Profile(); err != nil {
+			t.Fatalf("this is a legitimate config: %v", err)
+		}
+		if len(c.Warnings()) != 0 {
+			t.Errorf("unexpected warning: %v", c.Warnings())
+		}
+	})
+
 	t.Run("a list with one runnable rule is fine", func(t *testing.T) {
 		c := &Config{Strict: true, Rules: RulesConfig{Only: []string{"slow-query", "select-star"}}}
 		if _, err := c.Profile(); err != nil {

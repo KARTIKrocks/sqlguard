@@ -39,10 +39,7 @@ type findingPolicy struct {
 // repeating a literal here, so `Register(RuleSpec{Name: "slow-query", …})` is
 // what decides it — the same as for an evaluated rule.
 func resolvePolicy(a *analyzer.Analyzer, name string) findingPolicy {
-	def, ok := analyzer.RuleDefaultSeverity(name)
-	if !ok {
-		def = analyzer.SeverityWarning
-	}
+	def := analyzer.RuleDefaultSeverityOr(name, analyzer.SeverityWarning)
 	return findingPolicy{
 		enabled:  a.RuleEnabled(name),
 		severity: a.RuleSeverity(name, def),

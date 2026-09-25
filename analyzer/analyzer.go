@@ -117,7 +117,7 @@ func DefaultWithProfile(p Profile) *Analyzer {
 		if p.Disabled[spec.Name] {
 			disabled[spec.Name] = true
 		}
-		if p.skip(spec.Name) {
+		if p.Skip(spec.Name) {
 			continue
 		}
 		// Registered for addressability only — middleware and explain build

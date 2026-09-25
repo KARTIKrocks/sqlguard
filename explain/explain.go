@@ -109,11 +109,7 @@ func (p *PlanAnalyzer) Analyze(ctx context.Context, query string) (*Result, erro
 // Factory, so nothing else would ever consult their DefaultSeverity, and a
 // literal here would silently outrank it.
 func planSeverity(name string) analyzer.Severity {
-	sev, ok := analyzer.RuleDefaultSeverity(name)
-	if !ok {
-		return analyzer.SeverityWarning
-	}
-	return sev
+	return analyzer.RuleDefaultSeverityOr(name, analyzer.SeverityWarning)
 }
 
 // applyProfile drops findings the profile disabled and applies any severity

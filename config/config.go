@@ -201,12 +201,14 @@ func (c *Config) Profile() (analyzer.Profile, error) {
 	if err := collectNames(c.Rules.Only, p.Only, checkName); err != nil {
 		return p, err
 	}
-	if err := checkOnlySelectsSomething(c.Rules.Only, p.Only, warn); err != nil {
-		return p, err
-	}
+
 	if err := applySeverities(c.Rules.Severity, &p, checkName, warn); err != nil {
 		return p, err
 	}
+	if err := checkScanHasRules(c.Rules.Only, p, warn); err != nil {
+		return p, err
+	}
+
 	for name, kv := range c.Rules.Settings {
 		ok, err := checkName(name)
 		if err != nil {
@@ -223,33 +225,40 @@ func (c *Config) Profile() (analyzer.Profile, error) {
 	return p, nil
 }
 
-// checkOnlySelectsSomething reports an `only:` list that does not narrow the
-// scan to anything. Two shapes reach here, and they fail in opposite
-// directions, so it takes the list as written (`configured`) as well as the
-// resolved set.
+// checkScanHasRules reports an `only:` list that leaves the scanner with
+// nothing to run. It asks the profile the same question the Analyzer does —
+// does any evaluated rule survive Skip — rather than testing the list against
+// EvaluatedRuleNames, which was blind to a name that `only:` selects and
+// `disable:` (or `severity: off`) then takes away again.
 //
-// A list naming only runtime or plan rules — `only: [slow-query]` — is now
-// accepted, because every documented rule is addressable, and leaves the
-// scanner with no rule to run: `sqlguard scan` reports nothing on any
-// codebase, which is indistinguishable from a clean scan.
+// Three shapes reach here:
 //
-// A list whose names are all unknown — `only: [selct-star]` — resolves to an
-// empty whitelist, and an empty whitelist is not a whitelist at all, so
-// *every* rule runs. The `unknown rule` warning alone does not say that the
-// narrowing the user asked for turned into its opposite.
-func checkOnlySelectsSomething(configured []string, resolved map[string]bool, warn func(string, ...any) error) error {
-	if len(configured) == 0 {
+//   - `only: [slow-query]` — valid names now that every documented rule is
+//     addressable, but none of them runs over a statement.
+//   - `only: [select-star]` with `disable: [select-star]` — the whitelist
+//     excludes everything else and the disabled set removes the remainder.
+//   - `only: [selct-star]` — every name unknown, so the whitelist resolves to
+//     empty; an empty whitelist is not a whitelist, and *every* rule runs,
+//     which is the opposite of the narrowing that was asked for.
+//
+// All three report nothing on any codebase, which reads as a clean scan.
+//
+// The check is gated on `only:` being configured. Disabling every rule without
+// one is a deliberate act — using sqlguard purely for its runtime findings is
+// a legitimate setup — and does not deserve a warning.
+func checkScanHasRules(configuredOnly []string, p analyzer.Profile, warn func(string, ...any) error) error {
+	if len(configuredOnly) == 0 {
 		return nil
 	}
-	if len(resolved) == 0 {
+	if len(p.Only) == 0 {
 		return warn("rules.only named no rule that exists, so it selects nothing and every rule runs")
 	}
 	for _, name := range analyzer.EvaluatedRuleNames() {
-		if resolved[name] {
+		if !p.Skip(name) {
 			return nil
 		}
 	}
-	return warn("rules.only names no rule that runs over a statement, so nothing will be scanned " +
+	return warn("rules.only leaves no rule that runs over a statement, so nothing will be scanned " +
 		"(runtime and EXPLAIN rules are reported by the middleware and `sqlguard explain`, not the scanner)")
 }
 
@@ -385,9 +394,15 @@ func checkSettings(rule string, kv map[string]any, warn func(string, ...any) err
 }
 
 func checkSettingValue(rule, key string, kind settingKind, v any, warn func(string, ...any) error) error {
+	// Validate through the same accessors the rules read with, so a value
+	// accepted here can never be one the reader quietly replaces with its
+	// default. A second copy of these parsing rules is exactly how the two
+	// drift apart.
+	one := analyzer.Settings{key: v}
+
 	switch kind {
 	case settingDuration, settingPositiveDuration:
-		d, ok := asDuration(v)
+		d, ok := one.LookupDuration(key)
 		if !ok {
 			// A bool, a list or a map reads back as the default, which for
 			// n-plus-one.window means detection silently never switches on.
@@ -397,7 +412,7 @@ func checkSettingValue(rule, key string, kind settingKind, v any, warn func(stri
 			return warn("rule %q: setting %q must be greater than 0, got %v", rule, key, v)
 		}
 	case settingInt, settingPositiveInt:
-		n, ok := asInt(v)
+		n, ok := one.LookupInt(key)
 		if !ok {
 			// A quoted number is the common YAML slip. Settings.Int does not
 			// accept a string, so it would read back as the default: for
@@ -410,36 +425,6 @@ func checkSettingValue(rule, key string, kind settingKind, v any, warn func(stri
 		}
 	}
 	return nil
-}
-
-// asDuration mirrors analyzer.Settings.Duration, so the check and the read
-// agree on both what parses and what it parses to. A value this rejects would
-// read back as the caller's default.
-func asDuration(v any) (time.Duration, bool) {
-	switch n := v.(type) {
-	case string:
-		d, err := time.ParseDuration(strings.TrimSpace(n))
-		return d, err == nil
-	case int:
-		return time.Duration(n) * time.Millisecond, true
-	case int64:
-		return time.Duration(n) * time.Millisecond, true
-	case float64:
-		return time.Duration(n * float64(time.Millisecond)), true
-	}
-	return 0, false
-}
-
-func asInt(v any) (int, bool) {
-	switch n := v.(type) {
-	case int:
-		return n, true
-	case int64:
-		return int(n), true
-	case float64:
-		return int(n), true
-	}
-	return 0, false
 }
 
 func sortedKeys(m map[string]settingKind) []string {

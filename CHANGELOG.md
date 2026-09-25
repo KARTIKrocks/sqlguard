@@ -20,6 +20,12 @@ the same version in lockstep.
   the runtime findings in middleware and the plan findings in `explain`
   exactly as it reaches a statement rule. They are still never evaluated
   against parsed SQL, so they do not fire during `sqlguard scan`.
+- **Breaking (Go API): `middleware.NewQueryTracker` takes a severity.** The
+  signature is now `NewQueryTracker(threshold, window, severity, reportFn)`.
+  It is exported, so a caller constructing a tracker directly will not
+  compile until the argument is added; pass `analyzer.SeverityWarning` for
+  the previous behaviour. Guard resolves it from the profile, which is what
+  makes a `severity:` override on `n-plus-one` reach the finding.
 - **Breaking (config): the slow-query threshold moved** from the top-level
   `slow-query.threshold` key to `rules.settings.slow-query.threshold`, so
   every per-rule tunable lives in one place. `Config.SlowQueryThreshold` and
