@@ -11,6 +11,23 @@ the same version in lockstep.
 
 ### Fixed
 
+- **Every query is no longer analyzed twice when the base driver returns
+  `driver.ErrSkip`** ([#67]). `wConn.QueryContext`/`ExecContext` analyzed the
+  query before handing it to the base. A base with no direct `Queryer`/`Execer`
+  was covered, but not one that has the entry point and declines the call with
+  `driver.ErrSkip`: `database/sql` then falls back to Prepare+Query, which
+  re-enters through the wrapped statement and analyzes the same execution a
+  second time. `go-sql-driver/mysql` returns `ErrSkip` for every parameterized
+  query unless `interpolateParams=true`, which is off by default — so on MySQL
+  essentially all traffic was double-analyzed. **N+1 counts were doubled**,
+  halving the effective threshold (`WithN1Detection(10, …)` fired at 5 real
+  queries) and producing spurious N+1 reports; duplicate static findings were
+  masked by the default one-minute dedup window and only surfaced under
+  `WithFindingDedup(0)`. The base is now called first and analysis is skipped
+  when it answers `ErrSkip`, so the prepare path remains the single analysis
+  point. On this path findings are produced after execution rather than
+  before, which nothing consumes.
+
 - **`pgparser` no longer reports `insert-without-columns` on
   `INSERT INTO t DEFAULT VALUES`** ([#68]). The grammar encodes that form as
   an absent row source, and the parser refilled `InsertColumnsListed` from
@@ -61,6 +78,7 @@ the same version in lockstep.
   column list" to "Row-inserting statement without an explicit column list",
   since it no longer fires only on `INSERT`.
 
+[#67]: https://github.com/KARTIKrocks/sqlguard/issues/67
 [#68]: https://github.com/KARTIKrocks/sqlguard/issues/68
 
 ## [0.4.0] - 2026-09-25

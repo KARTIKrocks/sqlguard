@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"database/sql"
 	"database/sql/driver"
 	"fmt"
@@ -42,14 +43,52 @@ type fakeTx struct{}
 func (*fakeTx) Commit() error   { return nil }
 func (*fakeTx) Rollback() error { return nil }
 
-// openFakeGuarded registers a wrapped fakeNoQueryerDriver and returns the DB
-// plus the reporter that records findings. Dedup is off so every analysis is
-// counted (the bug would surface as 2 findings for one query).
-func openFakeGuarded(t *testing.T) (*sql.DB, *countingReporter) {
+// fakeErrSkipDriver mirrors go-sql-driver/mysql: its Conn *does* implement
+// QueryerContext/ExecerContext, but declines every query with driver.ErrSkip
+// (mysql does exactly that for parameterized queries unless
+// interpolateParams=true, which is off by default). database/sql then falls
+// back to Prepare+Query, re-entering through wStmt, so the query must still
+// be analyzed exactly once.
+type fakeErrSkipDriver struct{}
+
+func (fakeErrSkipDriver) Open(string) (driver.Conn, error) { return &errSkipConn{}, nil }
+
+type errSkipConn struct{ fakeConn }
+
+func (*errSkipConn) QueryContext(context.Context, string, []driver.NamedValue) (driver.Rows, error) {
+	return nil, driver.ErrSkip
+}
+
+func (*errSkipConn) ExecContext(context.Context, string, []driver.NamedValue) (driver.Result, error) {
+	return nil, driver.ErrSkip
+}
+
+// fakeQueryerDriver answers on the direct path: its Conn executes the query
+// itself, so database/sql never falls back to Prepare. Analysis happens at
+// that level instead — still exactly once.
+type fakeQueryerDriver struct{}
+
+func (fakeQueryerDriver) Open(string) (driver.Conn, error) { return &queryerConn{}, nil }
+
+type queryerConn struct{ fakeConn }
+
+func (*queryerConn) QueryContext(context.Context, string, []driver.NamedValue) (driver.Rows, error) {
+	return &fakeRows{}, nil
+}
+
+func (*queryerConn) ExecContext(context.Context, string, []driver.NamedValue) (driver.Result, error) {
+	return driver.RowsAffected(0), nil
+}
+
+// openFakeGuarded registers base wrapped in a Guard and returns the DB plus
+// the reporter that records findings. Dedup is off so every analysis is
+// counted (a double analysis surfaces as 2 findings for one query).
+func openFakeGuarded(t *testing.T, base driver.Driver, extra ...Option) (*sql.DB, *countingReporter) {
 	t.Helper()
 	rep := &countingReporter{}
 	name := fmt.Sprintf("sqlguard-fake-%d", driverSeq.Add(1))
-	sql.Register(name, WrapDriver(fakeNoQueryerDriver{}, WithReporter(rep), WithFindingDedup(0)))
+	opts := append([]Option{WithReporter(rep), WithFindingDedup(0)}, extra...)
+	sql.Register(name, WrapDriver(base, opts...))
 	db, err := sql.Open(name, "")
 	if err != nil {
 		t.Fatalf("open: %v", err)
@@ -59,7 +98,7 @@ func openFakeGuarded(t *testing.T) (*sql.DB, *countingReporter) {
 }
 
 func TestDriver_NoQueryerContextAnalyzedOnce(t *testing.T) {
-	db, rep := openFakeGuarded(t)
+	db, rep := openFakeGuarded(t, fakeNoQueryerDriver{})
 
 	rows, err := db.Query("DELETE FROM accounts") // flagged: delete-without-where
 	if err != nil {
@@ -73,7 +112,7 @@ func TestDriver_NoQueryerContextAnalyzedOnce(t *testing.T) {
 }
 
 func TestDriver_NoExecerContextAnalyzedOnce(t *testing.T) {
-	db, rep := openFakeGuarded(t)
+	db, rep := openFakeGuarded(t, fakeNoQueryerDriver{})
 
 	if _, err := db.Exec("DELETE FROM accounts"); err != nil {
 		t.Fatalf("exec: %v", err)
@@ -84,21 +123,81 @@ func TestDriver_NoExecerContextAnalyzedOnce(t *testing.T) {
 	}
 }
 
-// With N+1 enabled, each logical query must increment the counter once. If the
-// ErrSkip path double-counted, threshold=2 would trip after a single query.
+// With N+1 enabled, each logical query must increment the counter once. If a
+// fallback path double-counted, threshold=2 would trip after a single query.
 func TestDriver_NoQueryerContextN1CountedOnce(t *testing.T) {
-	rep := &countingReporter{}
-	name := fmt.Sprintf("sqlguard-fake-%d", driverSeq.Add(1))
-	sql.Register(name, WrapDriver(fakeNoQueryerDriver{},
-		WithReporter(rep), WithFindingDedup(0), WithN1Detection(2, time.Minute)))
-	db, err := sql.Open(name, "")
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	defer db.Close()
+	assertOneQueryDoesNotTripN1(t, fakeNoQueryerDriver{})
+}
 
-	// One execution of a non-flagged query: no static finding, and the N+1
-	// counter should be at 1 (below threshold 2), so nothing is reported.
+// The ErrSkip path is the one that matters in production: on MySQL every
+// parameterized query takes it, so a double count halves every configured
+// N+1 threshold (issue #67).
+func TestDriver_ErrSkipQueryAnalyzedOnce(t *testing.T) {
+	db, rep := openFakeGuarded(t, fakeErrSkipDriver{})
+
+	rows, err := db.Query("DELETE FROM accounts") // flagged: delete-without-where
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	rows.Close()
+
+	if got := rep.count(); got != 1 {
+		t.Errorf("a query the base declined with ErrSkip must be analyzed once, got %d", got)
+	}
+}
+
+func TestDriver_ErrSkipExecAnalyzedOnce(t *testing.T) {
+	db, rep := openFakeGuarded(t, fakeErrSkipDriver{})
+
+	if _, err := db.Exec("DELETE FROM accounts"); err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+
+	if got := rep.count(); got != 1 {
+		t.Errorf("an exec the base declined with ErrSkip must be analyzed once, got %d", got)
+	}
+}
+
+func TestDriver_ErrSkipN1CountedOnce(t *testing.T) {
+	assertOneQueryDoesNotTripN1(t, fakeErrSkipDriver{})
+}
+
+// A base that does handle the direct path is unaffected: it executes the
+// query itself, database/sql never falls back, and the single analysis
+// happens at the conn level.
+func TestDriver_DirectQueryerAnalyzedOnce(t *testing.T) {
+	db, rep := openFakeGuarded(t, fakeQueryerDriver{})
+
+	rows, err := db.Query("DELETE FROM accounts") // flagged: delete-without-where
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	rows.Close()
+
+	if got := rep.count(); got != 1 {
+		t.Errorf("a query the base executed directly must be analyzed once, got %d", got)
+	}
+
+	if _, err := db.Exec("DELETE FROM accounts"); err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+
+	if got := rep.count(); got != 2 {
+		t.Errorf("the direct exec path must add exactly one analysis, got %d total", got)
+	}
+}
+
+func TestDriver_DirectQueryerN1CountedOnce(t *testing.T) {
+	assertOneQueryDoesNotTripN1(t, fakeQueryerDriver{})
+}
+
+// assertOneQueryDoesNotTripN1 runs a single non-flagged query against base
+// with the N+1 threshold at 2: nothing may be reported, because one execution
+// must move the counter by one.
+func assertOneQueryDoesNotTripN1(t *testing.T, base driver.Driver) {
+	t.Helper()
+	db, rep := openFakeGuarded(t, base, WithN1Detection(2, time.Minute))
+
 	rows, err := db.Query("SELECT id, name FROM users WHERE id = ?", 1)
 	if err != nil {
 		t.Fatalf("query: %v", err)

@@ -6,6 +6,7 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
+	"time"
 )
 
 // This file implements the standard database/sql driver-wrapping pattern
@@ -214,15 +215,14 @@ func (c *wConn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, 
 }
 
 func (c *wConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
-	// Observe only on a path that actually executes. When the base has no direct
-	// Query entry point we return driver.ErrSkip *without* analyzing, so
-	// database/sql's Prepare+Query fallback — which re-enters through wStmt — is
-	// the single place this query is analyzed. Analyzing here too would count
-	// the same logical query twice (a duplicate finding and an inflated N+1).
+	// Analyze only on a path that actually executes — see analyzeExecuted for
+	// why that decision can only be made after calling the base. When the base
+	// has no direct Query entry point at all we return driver.ErrSkip without
+	// analyzing, for the same reason.
 	if qc, ok := c.base.(driver.QueryerContext); ok {
-		done := c.g.Observe(query)
+		start := time.Now()
 		rows, err := qc.QueryContext(ctx, query, args)
-		done(err)
+		analyzeExecuted(c.g, query, start, err)
 		return rows, err
 	}
 	if q, ok := c.base.(driver.Queryer); ok { //nolint:staticcheck // legacy fallback
@@ -230,22 +230,21 @@ func (c *wConn) QueryContext(ctx context.Context, query string, args []driver.Na
 		if verr != nil {
 			return nil, verr
 		}
-		done := c.g.Observe(query)
+		start := time.Now()
 		rows, err := q.Query(query, values)
-		done(err)
+		analyzeExecuted(c.g, query, start, err)
 		return rows, err
 	}
 	return nil, driver.ErrSkip
 }
 
 func (c *wConn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
-	// See QueryContext: analyze only when this path executes. Returning ErrSkip
-	// without analyzing lets the Prepare+Exec fallback (via wStmt) be the single
-	// analysis point, avoiding a double count.
+	// See QueryContext: analyze only when this path executes, which is known
+	// only once the base has answered.
 	if ec, ok := c.base.(driver.ExecerContext); ok {
-		done := c.g.Observe(query)
+		start := time.Now()
 		res, err := ec.ExecContext(ctx, query, args)
-		done(err)
+		analyzeExecuted(c.g, query, start, err)
 		return res, err
 	}
 	if e, ok := c.base.(driver.Execer); ok { //nolint:staticcheck // legacy fallback
@@ -253,9 +252,9 @@ func (c *wConn) ExecContext(ctx context.Context, query string, args []driver.Nam
 		if verr != nil {
 			return nil, verr
 		}
-		done := c.g.Observe(query)
+		start := time.Now()
 		res, err := e.Exec(query, values)
-		done(err)
+		analyzeExecuted(c.g, query, start, err)
 		return res, err
 	}
 	return nil, driver.ErrSkip
@@ -375,6 +374,35 @@ func (t *wTx) Commit() error   { return t.base.Commit() }
 func (t *wTx) Rollback() error { return t.base.Rollback() }
 
 // ---- helpers ----
+
+// analyzeExecuted analyzes a query the base driver has just been handed and
+// records its latency. It is Guard.Observe split around the call, because on
+// the conn-level Query/Exec path whether the query ran at all is known only
+// from the base's answer: driver.ErrSkip means the base declined it, and
+// database/sql then retries through Prepare+Query, which re-enters via wStmt.
+// Analyzing here too would count one logical query twice — a duplicate
+// finding and, worse, a doubled N+1 count, halving the configured threshold.
+//
+// This is the common path, not an edge case: go-sql-driver/mysql returns
+// ErrSkip for every parameterized query unless interpolateParams=true, which
+// is off by default.
+//
+// Analysis therefore happens after execution here rather than before it;
+// nothing consumes findings pre-execution. Elapsed is read before Check so the
+// measured latency stays the base driver's alone — running the rules inside
+// the window would let analysis time push a query past the slow-query
+// threshold. Latency is recorded only for a successful call, matching
+// Guard.Observe (a failed query's latency is meaningless).
+func analyzeExecuted(g *Guard, query string, start time.Time, err error) {
+	if errors.Is(err, driver.ErrSkip) {
+		return
+	}
+	elapsed := time.Since(start)
+	g.Check(query)
+	if err == nil {
+		g.CheckLatency(query, elapsed)
+	}
+}
 
 // namedToValues converts named values to positional values for the legacy
 // Queryer/Execer/Stmt fallback paths, which predate named parameters.

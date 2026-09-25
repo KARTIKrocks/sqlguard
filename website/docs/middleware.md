@@ -97,6 +97,14 @@ back exactly as it would for the bare driver. A driver that lacks
 `QueryerContext`, for example, still gets analyzed exactly once, on the
 prepare-then-execute path `database/sql` takes instead.
 
+_Changed in 0.5._ The same holds for a driver that _has_ `QueryerContext` and
+declines an individual query with `driver.ErrSkip` — `go-sql-driver/mysql`
+does this for every parameterized query unless `interpolateParams=true`.
+Before 0.5 that query was analyzed twice: once before the base declined, once
+on the fallback path. N+1 counts were doubled on MySQL as a result. Analysis
+on the direct path now happens once the base has answered, so a declined query
+is analyzed only where it actually runs.
+
 The wrapper never modifies the SQL text or the arguments. It observes.
 
 ## Reporters
