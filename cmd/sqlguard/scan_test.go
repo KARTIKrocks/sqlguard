@@ -1000,20 +1000,10 @@ func TestScan_DotsDirectoryWarns(t *testing.T) {
 	queries := filepath.Join(root, "queries")
 	dots := filepath.Join(queries, "...")
 
-	// A directory named "..." is legal on Unix but not universally: Win32
-	// strips trailing dots from a path component, so the name cannot survive
-	// there. Skip on the fixture rather than on runtime.GOOS — that covers
-	// any filesystem which refuses the name or stores it under a different
-	// one, instead of hard-coding the list of platforms that do.
+	requireDotsDirSupport(t)
+
 	if err := os.MkdirAll(dots, 0o755); err != nil {
-		t.Skipf("this filesystem will not create a directory named %q: %v", "...", err)
-	}
-	entries, err := os.ReadDir(queries)
-	if err != nil {
-		t.Fatalf("readdir: %v", err)
-	}
-	if !slices.ContainsFunc(entries, func(e os.DirEntry) bool { return e.Name() == "..." }) {
-		t.Skipf("this filesystem normalised the directory name away from %q", "...")
+		t.Fatalf("mkdir: %v", err)
 	}
 	createTestFile(t, dots, "hidden.go", `package dots
 import "database/sql"
@@ -1075,4 +1065,42 @@ func f(db *sql.DB) {
 	if strings.Contains(stderr, "both a package pattern") {
 		t.Errorf("warned with no dots directory present:\n%s", stderr)
 	}
+}
+
+// requireDotsDirSupport skips when the filesystem cannot represent a directory
+// named "..." — Win32 strips trailing dots from a path component, so the name
+// does not survive there.
+//
+// It decides that on its own probe directory, and only after confirming an
+// ordinary name works in the same place. A permission, quota or disk error
+// would otherwise look identical to an unrepresentable name and skip the whole
+// test, letting the suite pass without checking the warning or the
+// trailing-separator scan at all. Those causes fail instead.
+//
+// Discriminating this way rather than by errno keeps it independent of how a
+// given platform reports an invalid name.
+func requireDotsDirSupport(t *testing.T) {
+	t.Helper()
+
+	base := t.TempDir()
+	dotsErr := os.Mkdir(filepath.Join(base, "..."), 0o755)
+
+	if dotsErr == nil {
+		entries, err := os.ReadDir(base)
+		if err != nil {
+			t.Fatalf("probing %s: %v", base, err)
+		}
+		if slices.ContainsFunc(entries, func(e os.DirEntry) bool { return e.Name() == "..." }) {
+			return
+		}
+		t.Skipf("this filesystem stored a directory named %q under another name", "...")
+	}
+
+	// The name failed. Only a filesystem that accepts an ordinary name in the
+	// same directory tells us the name itself was the problem.
+	if err := os.Mkdir(filepath.Join(base, "ordinary"), 0o755); err != nil {
+		t.Fatalf("cannot create directories under %s at all: %v (creating %q failed with %v)",
+			base, err, "...", dotsErr)
+	}
+	t.Skipf("this filesystem will not create a directory named %q: %v", "...", dotsErr)
 }
