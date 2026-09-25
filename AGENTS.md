@@ -99,9 +99,12 @@ version does (served at `/docs/`). Versions are `MAJOR.MINOR`.
   API table cell, open a paragraph with `_Added in 0.3._`, add a trailing
   `// 0.3+` comment in a code block, or write `_Changed in 0.3._` plus one line
   on the previous behaviour.
-- **Names must be exact.** Every option, function and rule name in the docs
-  must match an exported identifier or registered rule name; check the source
-  before writing one.
+- **Names must be exact.** Every name the docs present as sqlguard's own — an
+  option, function, type or rule — must match an exported identifier or
+  registered rule name; check the source before writing one. This is about
+  sqlguard's API: a third-party identifier the docs name (`sql.Open`,
+  `stdlib.GetConnector`, `gorm.Plugin`, `interpolateParams`,
+  `standard_conforming_strings`) is correct when it matches upstream.
 - **Blog** is wired up but has no posts, so the navbar/footer carry no Blog
   link; add the links in `docusaurus.config.ts` together with the first post.
 

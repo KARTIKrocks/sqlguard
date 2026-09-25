@@ -213,9 +213,14 @@ reviews:
     - path: "website/docs/**"
       instructions: >-
         Docusaurus source for the unreleased docs. Verify every Go snippet
-        compiles against the current API and that option, function and rule
-        names match the exported identifiers / registered rule names exactly —
-        a wrong name here is a support burden, not a typo. This site is
+        compiles against the current API and that every name presented as
+        sqlguard's own — option, function, type or rule — matches an exported
+        identifier / registered rule name exactly; a wrong name here is a
+        support burden, not a typo. That applies to sqlguard's API only:
+        identifiers owned by the standard library, a driver, an ORM or a
+        database (sql.Open, stdlib.GetConnector, gorm.Plugin,
+        interpolateParams, standard_conforming_strings, …) are correct when
+        they match upstream, and naming one is not a violation. This site is
         versioned by snapshot, not per release: additive changes are marked
         inline instead of being snapshotted, so check that anything documenting
         a new API carries its version marker — `_0.3+_` appended to an API
