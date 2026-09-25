@@ -1,0 +1,26 @@
+{
+  "quality_gate": {
+    "enabled": true,
+    "conditions": [
+      {
+        "metric": "secrets",
+        "operator": "GREATER_THAN",
+        "value": "0",
+        "scope": ["commit", "pull_request"],
+        "exclude_files": ["test/integration/docker-compose.yml"]
+      },
+      {
+        "metric": "sast_rating",
+        "operator": "LESS_THAN",
+        "value": "B",
+        "scope": ["pull_request"]
+      },
+      {
+        "metric": "sca_rating",
+        "operator": "LESS_THAN",
+        "value": "B",
+        "scope": ["pull_request"]
+      }
+    ]
+  }
+}

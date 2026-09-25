@@ -114,8 +114,22 @@ reviews:
         and a faithful wrapper must delegate to whatever the base exposes. The
         optional-interface forwarding (return driver.ErrSkip / documented no-op
         when the base lacks an interface) preserves bare-driver behavior — do not
-        "simplify" it away. Analyze only on the path that actually executes
-        (never before an ErrSkip return) to avoid double-counting.
+        "simplify" it away.
+        A query must be analyzed exactly once per execution, so every
+        interception point here analyzes AFTER calling the base, never before
+        (analyzeExecuted), and argument conversion runs first. Whether the
+        query ran is knowable only from the base's answer, and two answers mean
+        it did not: driver.ErrSkip (the base declined a direct Query/Exec, and
+        database/sql falls back to Prepare+Query, re-entering via wStmt —
+        go-sql-driver/mysql answers this for every parameterized query unless
+        interpolateParams=true) and driver.ErrBadConn (the connection was dead,
+        and database/sql retries on another connection up to twice more).
+        Analyzing a declined attempt multiplies one logical query by two or
+        three; the duplicate finding hides behind the dedup window but the
+        inflated N+1 count silently lowers the configured threshold (#67). Flag
+        any change that moves analysis ahead of the base call or restores
+        Guard.Observe here — Observe is for interception points that are only
+        ever told a query ran, i.e. the out-of-tree integrations.
 
     - path: "integrations/**"
       instructions: >-
