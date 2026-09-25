@@ -248,8 +248,8 @@ func (p *PlanAnalyzer) walkPgPlan(node *pgPlanNode, query string, issues *[]anal
 		// seq-scan registered at CRITICAL report the >1000-row case as the
 		// *less* severe of the two.
 		severity := planSeverity("seq-scan")
-		if node.PlanRows > 1000 && severity < analyzer.SeverityWarning {
-			severity = analyzer.SeverityWarning
+		if node.PlanRows > 1000 {
+			severity = max(severity, analyzer.SeverityWarning)
 		}
 		*issues = append(*issues, analyzer.Result{
 			RuleName:   "seq-scan",
