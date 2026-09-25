@@ -74,3 +74,36 @@ func TestOnlyWhitelistReachesNonEvaluatedRules(t *testing.T) {
 		t.Error("the whitelisted rule should stay enabled")
 	}
 }
+
+// TestRuleDisabledExplicitlyIgnoresOnly pins the one place where
+// RuleDisabledExplicitly is deliberately not the complement of RuleEnabled.
+// A whitelist turns a rule off for the analyzer and the runtime, but it does
+// not count as naming that rule, so `explain` keeps reporting it.
+func TestRuleDisabledExplicitlyIgnoresOnly(t *testing.T) {
+	a := DefaultWithProfile(Profile{Only: map[string]bool{"select-star": true}})
+
+	if a.RuleEnabled("seq-scan") {
+		t.Error("an only whitelist should leave seq-scan disabled for RuleEnabled")
+	}
+	if a.RuleDisabledExplicitly("seq-scan") {
+		t.Error("a whitelist is not the same as naming seq-scan in disable:")
+	}
+}
+
+func TestRuleDisabledExplicitlyHonoursDisable(t *testing.T) {
+	a := DefaultWithProfile(Profile{Disabled: map[string]bool{"seq-scan": true}})
+
+	if !a.RuleDisabledExplicitly("seq-scan") {
+		t.Error("seq-scan was named in disable: and should be reported so")
+	}
+	if a.RuleEnabled("seq-scan") {
+		t.Error("RuleEnabled should agree when the rule was named")
+	}
+	if a.RuleDisabledExplicitly("filesort") {
+		t.Error("filesort was not named and should not be reported disabled")
+	}
+	// An unregistered name is nobody's to turn off.
+	if a.RuleDisabledExplicitly("somebody-elses-rule") {
+		t.Error("an unregistered rule should never read as disabled")
+	}
+}

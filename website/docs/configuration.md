@@ -174,5 +174,14 @@ being built at all despite `WithN1Detection`. That is deliberate — `disable`
 is an instruction, not a tuning value, and an operator editing
 `.sqlguard.yml` should be able to silence a noisy rule without a redeploy.
 
+## What `only:` reaches
+
+`only:` applies to the static scan and to the runtime findings, but **not to
+[`sqlguard explain`](explain)**. A whitelist is nearly always written to focus
+a scan, and it selects which rules run over a statement; if it reached the
+plan rules, a config that never mentions EXPLAIN would quietly turn that
+command into one that always reports nothing. To switch a plan rule off, name
+it in `disable:` or give it `severity: off` — both reach every surface.
+
 Inline [suppressions](suppressions) win over both: they silence a finding at
 one site regardless of config.

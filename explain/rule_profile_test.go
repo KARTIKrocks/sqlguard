@@ -39,15 +39,41 @@ func TestApplyProfile_Disable(t *testing.T) {
 	}
 }
 
-func TestApplyProfile_Only(t *testing.T) {
+// TestApplyProfile_IgnoresOnly pins the asymmetry. `only:` is overwhelmingly
+// written to focus `sqlguard scan`, and it selects which rules run over a
+// statement; letting it reach here would mean a config that never mentions
+// EXPLAIN silently turns `sqlguard explain` into a command that always reports
+// nothing. Turning a plan rule off takes naming it in `disable:`.
+func TestApplyProfile_IgnoresOnly(t *testing.T) {
 	p := &PlanAnalyzer{rules: analyzer.DefaultWithProfile(analyzer.Profile{
-		Only: map[string]bool{"filesort": true},
+		Only: map[string]bool{"select-star": true},
 	})}
 
 	got := p.applyProfile(planIssues())
 
-	if len(got) != 1 || got[0].RuleName != "filesort" {
-		t.Errorf("an `only` whitelist should leave just filesort, got %+v", got)
+	if len(got) != 3 {
+		t.Errorf("an `only` whitelist should not filter plan findings, got %+v", got)
+	}
+}
+
+// TestApplyProfile_DisableWinsInsideAnOnlyList is the escape hatch: `only:`
+// does not reach a plan rule, but naming one in `disable:` still does, even
+// alongside a whitelist.
+func TestApplyProfile_DisableWinsInsideAnOnlyList(t *testing.T) {
+	p := &PlanAnalyzer{rules: analyzer.DefaultWithProfile(analyzer.Profile{
+		Only:     map[string]bool{"select-star": true},
+		Disabled: map[string]bool{"high-cost": true},
+	})}
+
+	got := p.applyProfile(planIssues())
+
+	if len(got) != 2 {
+		t.Fatalf("expected the other two to survive, got %+v", got)
+	}
+	for _, r := range got {
+		if r.RuleName == "high-cost" {
+			t.Error("an explicit disable should still drop the rule")
+		}
 	}
 }
 
