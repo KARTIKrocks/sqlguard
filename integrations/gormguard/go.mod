@@ -3,7 +3,7 @@ module github.com/KARTIKrocks/sqlguard/integrations/gormguard
 go 1.27
 
 require (
-	github.com/KARTIKrocks/sqlguard v0.4.0
+	github.com/KARTIKrocks/sqlguard v0.5.0
 	gorm.io/driver/sqlite v1.6.0
 	gorm.io/gorm v1.31.2
 )
