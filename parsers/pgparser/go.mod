@@ -3,7 +3,7 @@ module github.com/KARTIKrocks/sqlguard/parsers/pgparser
 go 1.27
 
 require (
-	github.com/KARTIKrocks/sqlguard v0.3.0
+	github.com/KARTIKrocks/sqlguard v0.4.0
 	github.com/auxten/postgresql-parser v1.0.1
 )
 
