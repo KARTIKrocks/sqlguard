@@ -35,7 +35,14 @@ type findingPolicy struct {
 	severity analyzer.Severity
 }
 
-func resolvePolicy(a *analyzer.Analyzer, name string, def analyzer.Severity) findingPolicy {
+// resolvePolicy reads the default severity from the registry rather than
+// repeating a literal here, so `Register(RuleSpec{Name: "slow-query", …})` is
+// what decides it — the same as for an evaluated rule.
+func resolvePolicy(a *analyzer.Analyzer, name string) findingPolicy {
+	def, ok := analyzer.RuleDefaultSeverity(name)
+	if !ok {
+		def = analyzer.SeverityWarning
+	}
 	return findingPolicy{
 		enabled:  a.RuleEnabled(name),
 		severity: a.RuleSeverity(name, def),
@@ -69,11 +76,11 @@ func NewGuard(opts ...Option) *Guard {
 	}
 
 	g := &Guard{opts: o, deduper: newDeduper(o.dedupWindow)}
-	g.slowQuery = resolvePolicy(o.analyzer, "slow-query", analyzer.SeverityWarning)
+	g.slowQuery = resolvePolicy(o.analyzer, "slow-query")
 	if o.cacheSize > 0 {
 		g.cache = newAnalysisCache(o.cacheSize)
 	}
-	n1 := resolvePolicy(o.analyzer, "n-plus-one", analyzer.SeverityWarning)
+	n1 := resolvePolicy(o.analyzer, "n-plus-one")
 	if o.enableN1 && n1.enabled {
 		g.tracker = NewQueryTracker(o.n1Threshold, o.n1Window, n1.severity, func(results []analyzer.Result) {
 			o.reporter.Report(results)

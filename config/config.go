@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -200,6 +201,9 @@ func (c *Config) Profile() (analyzer.Profile, error) {
 	if err := collectNames(c.Rules.Only, p.Only, checkName); err != nil {
 		return p, err
 	}
+	if err := checkOnlySelectsSomething(p.Only, warn); err != nil {
+		return p, err
+	}
 	if err := applySeverities(c.Rules.Severity, &p, checkName, warn); err != nil {
 		return p, err
 	}
@@ -217,6 +221,25 @@ func (c *Config) Profile() (analyzer.Profile, error) {
 		p.Settings[name] = analyzer.Settings(kv)
 	}
 	return p, nil
+}
+
+// checkOnlySelectsSomething reports an `only:` list that leaves no rule for
+// the analyzer to run. Since every documented rule became addressable, a list
+// naming only runtime or plan rules — `only: [slow-query]` — is accepted and
+// then turns `sqlguard scan` into a command that reports nothing on any
+// codebase, which looks exactly like a clean scan. Before, those names were
+// rejected outright as unknown, so the shape could not arise.
+func checkOnlySelectsSomething(only map[string]bool, warn func(string, ...any) error) error {
+	if len(only) == 0 {
+		return nil
+	}
+	for _, name := range analyzer.EvaluatedRuleNames() {
+		if only[name] {
+			return nil
+		}
+	}
+	return warn("rules.only names no rule that runs over a statement, so nothing will be scanned " +
+		"(runtime and EXPLAIN rules are reported by the middleware and `sqlguard explain`, not the scanner)")
 }
 
 // collectNames adds each usable name to the set. An unknown name is reported
@@ -279,13 +302,20 @@ type settingKind int
 const (
 	settingDuration settingKind = iota
 	settingInt
+	// settingPositiveInt additionally rejects zero and negatives, for a
+	// tunable where a non-positive value silently means "off".
+	settingPositiveInt
 )
 
-// checkedSettings names the settings that are read as something other than an
-// opaque value. Rules whose settings are not listed pass through unchecked.
-var checkedSettings = map[string]map[string]settingKind{
+// ruleSettings is the complete set of tunables, by rule and key. It is
+// complete on purpose: a rule absent from this map reads no settings at all,
+// so any key given for it is a mistake, and a key absent from a listed rule is
+// a misspelling. Either way the value is silently ignored at read time, which
+// is the failure this validation exists to prevent. Adding a tunable to a rule
+// means adding it here.
+var ruleSettings = map[string]map[string]settingKind{
 	"slow-query":        {"threshold": settingDuration},
-	"n-plus-one":        {"threshold": settingInt, "window": settingDuration},
+	"n-plus-one":        {"threshold": settingPositiveInt, "window": settingDuration},
 	"leading-wildcard":  {"min-length": settingInt},
 	"in-list-too-large": {"max-length": settingInt},
 	"large-offset":      {"threshold": settingInt},
@@ -297,12 +327,23 @@ var pairedSettings = map[string][]string{
 	"n-plus-one": {"threshold", "window"},
 }
 
-// checkSettings reports a setting whose value will not read back as its kind,
-// and a half-specified pair.
+// checkSettings reports a setting key the rule does not have, a value that
+// will not read back as its kind, and a half-specified pair.
 func checkSettings(rule string, kv map[string]any, warn func(string, ...any) error) error {
-	for key, kind := range checkedSettings[rule] {
-		v, present := kv[key]
-		if !present {
+	kinds, tunable := ruleSettings[rule]
+	for key, v := range kv {
+		kind, known := kinds[key]
+		if !known {
+			if !tunable {
+				if err := warn("rule %q has no settings, so %q is ignored", rule, key); err != nil {
+					return err
+				}
+				continue
+			}
+			if err := warn("rule %q: unknown setting %q (known: %s)",
+				rule, key, strings.Join(sortedKeys(kinds), ", ")); err != nil {
+				return err
+			}
 			continue
 		}
 		if err := checkSettingValue(rule, key, kind, v, warn); err != nil {
@@ -332,25 +373,54 @@ func checkSettings(rule string, kv map[string]any, warn func(string, ...any) err
 func checkSettingValue(rule, key string, kind settingKind, v any, warn func(string, ...any) error) error {
 	switch kind {
 	case settingDuration:
-		str, isStr := v.(string)
-		if !isStr {
-			return nil // a bare number is milliseconds; Settings handles it
-		}
-		if _, err := time.ParseDuration(strings.TrimSpace(str)); err != nil {
-			return warn("rule %q: setting %q: invalid duration %q", rule, key, str)
-		}
-	case settingInt:
-		switch v.(type) {
+		switch tv := v.(type) {
+		case string:
+			if _, err := time.ParseDuration(strings.TrimSpace(tv)); err != nil {
+				return warn("rule %q: setting %q: invalid duration %q", rule, key, tv)
+			}
 		case int, int64, float64:
-			return nil
+			// A bare number is milliseconds; Settings.Duration handles it.
+		default:
+			// Anything else — a bool, a list, a map — reads back as the
+			// default, which for n-plus-one.window means detection silently
+			// never switches on.
+			return warn("rule %q: setting %q: expected a duration or a number, got %v", rule, key, v)
 		}
-		// A quoted number is the common YAML slip. Settings.Int does not
-		// accept a string, so it would read back as the default: for
-		// n-plus-one.threshold that means detection never switches on.
-		return warn("rule %q: setting %q: expected a number, got %v (quoted numbers are strings in YAML)",
-			rule, key, v)
+	case settingInt, settingPositiveInt:
+		n, ok := asInt(v)
+		if !ok {
+			// A quoted number is the common YAML slip. Settings.Int does not
+			// accept a string, so it would read back as the default: for
+			// n-plus-one.threshold that means detection never switches on.
+			return warn("rule %q: setting %q: expected a number, got %v (quoted numbers are strings in YAML)",
+				rule, key, v)
+		}
+		if kind == settingPositiveInt && n <= 0 {
+			return warn("rule %q: setting %q must be greater than 0, got %d", rule, key, n)
+		}
 	}
 	return nil
+}
+
+func asInt(v any) (int, bool) {
+	switch n := v.(type) {
+	case int:
+		return n, true
+	case int64:
+		return int(n), true
+	case float64:
+		return int(n), true
+	}
+	return 0, false
+}
+
+func sortedKeys(m map[string]settingKind) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // rawQuery reports whether Result.Query redaction is disabled. Redaction is

@@ -104,6 +104,18 @@ func (p *PlanAnalyzer) Analyze(ctx context.Context, query string) (*Result, erro
 	return res, err
 }
 
+// planSeverity is the severity a plan rule was registered with. Reading it
+// keeps the registry entry meaningful for these rules too — they have no
+// Factory, so nothing else would ever consult their DefaultSeverity, and a
+// literal here would silently outrank it.
+func planSeverity(name string) analyzer.Severity {
+	sev, ok := analyzer.RuleDefaultSeverity(name)
+	if !ok {
+		return analyzer.SeverityWarning
+	}
+	return sev
+}
+
 // applyProfile drops findings the profile disabled and applies any severity
 // override. It runs once over the collected issues rather than at each site
 // that builds one, so a plan rule added later cannot forget the check.
@@ -237,7 +249,7 @@ func (p *PlanAnalyzer) walkPgPlan(node *pgPlanNode, query string, issues *[]anal
 
 	// Detect sequential scans
 	if node.NodeType == "Seq Scan" {
-		severity := analyzer.SeverityInfo
+		severity := planSeverity("seq-scan")
 		if node.PlanRows > 1000 {
 			severity = analyzer.SeverityWarning
 		}
@@ -254,7 +266,7 @@ func (p *PlanAnalyzer) walkPgPlan(node *pgPlanNode, query string, issues *[]anal
 	if node.TotalCost > 10000 {
 		*issues = append(*issues, analyzer.Result{
 			RuleName:   "high-cost",
-			Severity:   analyzer.SeverityWarning,
+			Severity:   planSeverity("high-cost"),
 			Query:      query,
 			Message:    fmt.Sprintf("High cost operation: %s (cost %.1f)", node.NodeType, node.TotalCost),
 			Suggestion: "Review query plan and consider optimization.",
@@ -363,7 +375,7 @@ func mysqlRowIssues(query string, col func(string) string) []analyzer.Result {
 		planRows, _ := strconv.ParseInt(col("rows"), 10, 64)
 		issues = append(issues, analyzer.Result{
 			RuleName:   "full-table-scan",
-			Severity:   analyzer.SeverityWarning,
+			Severity:   planSeverity("full-table-scan"),
 			Query:      query,
 			Message:    fmt.Sprintf("Full table scan on %s (estimated %d rows)", table, planRows),
 			Suggestion: "Consider adding an index to avoid full table scan.",
@@ -374,7 +386,7 @@ func mysqlRowIssues(query string, col func(string) string) []analyzer.Result {
 	if col("key") == "" && col("possible_keys") == "" {
 		issues = append(issues, analyzer.Result{
 			RuleName:   "no-index-used",
-			Severity:   analyzer.SeverityWarning,
+			Severity:   planSeverity("no-index-used"),
 			Query:      query,
 			Message:    "No index used on table " + table,
 			Suggestion: "Consider adding an index on the filtered/joined columns.",
@@ -385,7 +397,7 @@ func mysqlRowIssues(query string, col func(string) string) []analyzer.Result {
 	if strings.Contains(col("extra"), "Using filesort") {
 		issues = append(issues, analyzer.Result{
 			RuleName:   "filesort",
-			Severity:   analyzer.SeverityInfo,
+			Severity:   planSeverity("filesort"),
 			Query:      query,
 			Message:    "Filesort detected on table " + table,
 			Suggestion: "Consider adding an index that covers the ORDER BY columns.",

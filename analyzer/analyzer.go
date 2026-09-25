@@ -113,10 +113,11 @@ func Default() *Analyzer {
 // The config package uses this to turn a .sqlguard.yml into an Analyzer
 // without analyzer ever importing config or YAML.
 func DefaultWithProfile(p Profile) *Analyzer {
+	all := specs()
 	var bound []boundRule
-	disabled := make(map[string]bool, len(specs()))
+	disabled := make(map[string]bool, len(all))
 	disabledByName := make(map[string]bool, len(p.Disabled))
-	for _, spec := range specs() {
+	for _, spec := range all {
 		if p.Disabled[spec.Name] {
 			disabledByName[spec.Name] = true
 		}

@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -319,4 +320,100 @@ func TestProfile_UnknownNameIsIgnoredNotHonoured(t *testing.T) {
 			t.Errorf("a typo in only: silenced %q", name)
 		}
 	}
+}
+
+// TestProfile_OnlySelectingNothingRunnableWarns covers a shape that could not
+// exist before every rule became addressable: `only: [slow-query]` is now a
+// valid list that leaves the scanner with no rule to run, so `sqlguard scan`
+// reports nothing on any codebase and CI goes green on a tree full of
+// SELECT *. It has to say so.
+func TestProfile_OnlySelectingNothingRunnableWarns(t *testing.T) {
+	for _, only := range [][]string{
+		{"slow-query"},
+		{"seq-scan", "filesort"},
+		{"slow-query", "n-plus-one", "high-cost"},
+	} {
+		t.Run(strings.Join(only, ","), func(t *testing.T) {
+			c := &Config{Rules: RulesConfig{Only: only}}
+			if _, err := c.Profile(); err != nil {
+				t.Fatalf("lenient mode should not fail: %v", err)
+			}
+			if len(c.Warnings()) != 1 {
+				t.Fatalf("expected a warning, got %v", c.Warnings())
+			}
+			if !strings.Contains(c.Warnings()[0], "nothing will be scanned") {
+				t.Errorf("unexpected warning: %v", c.Warnings()[0])
+			}
+		})
+	}
+
+	t.Run("a list with one runnable rule is fine", func(t *testing.T) {
+		c := &Config{Strict: true, Rules: RulesConfig{Only: []string{"slow-query", "select-star"}}}
+		if _, err := c.Profile(); err != nil {
+			t.Errorf("a mixed list should be accepted: %v", err)
+		}
+	})
+
+	t.Run("no only list is fine", func(t *testing.T) {
+		c := &Config{Strict: true, Rules: RulesConfig{Disable: []string{"slow-query"}}}
+		if _, err := c.Profile(); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+}
+
+// TestProfile_ValidatesSettingKeys closes the last silent typo: the rule name
+// is known and the value is well-formed, but the key is misspelled, so the
+// setting is simply absent and the built-in default stands.
+func TestProfile_ValidatesSettingKeys(t *testing.T) {
+	cases := []struct {
+		name     string
+		settings map[string]map[string]any
+		wantIn   string
+	}{
+		{"misspelled key on a tunable rule",
+			//nolint:misspell // the typo is the fixture: this is the case under test
+			map[string]map[string]any{"slow-query": {"threshhold": "1s"}}, "unknown setting"},
+		{"key on a rule with no settings",
+			map[string]map[string]any{"select-star": {"threshold": 1}}, "has no settings"},
+		{"non-numeric, non-string duration",
+			map[string]map[string]any{"n-plus-one": {"threshold": 10, "window": true}}, "expected a duration"},
+		{"zero threshold means off, silently",
+			map[string]map[string]any{"n-plus-one": {"threshold": 0, "window": "1m"}}, "greater than 0"},
+		{"negative threshold",
+			map[string]map[string]any{"n-plus-one": {"threshold": -1, "window": "1m"}}, "greater than 0"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &Config{Rules: RulesConfig{Settings: tc.settings}}
+			if _, err := c.Profile(); err != nil {
+				t.Fatalf("lenient mode should not fail: %v", err)
+			}
+			if len(c.Warnings()) == 0 {
+				t.Fatal("expected a warning")
+			}
+			if !strings.Contains(c.Warnings()[0], tc.wantIn) {
+				t.Errorf("warning %q does not mention %q", c.Warnings()[0], tc.wantIn)
+			}
+
+			strict := &Config{Strict: true, Rules: RulesConfig{Settings: tc.settings}}
+			if _, err := strict.Profile(); err == nil {
+				t.Error("expected strict mode to reject it")
+			}
+		})
+	}
+
+	t.Run("every documented key is accepted", func(t *testing.T) {
+		c := &Config{Strict: true, Rules: RulesConfig{Settings: map[string]map[string]any{
+			"slow-query":        {"threshold": "500ms"},
+			"n-plus-one":        {"threshold": 5, "window": "2s"},
+			"leading-wildcard":  {"min-length": 4},
+			"in-list-too-large": {"max-length": 50},
+			"large-offset":      {"threshold": 2000},
+		}}}
+		if _, err := c.Profile(); err != nil {
+			t.Errorf("documented settings rejected: %v", err)
+		}
+	})
 }

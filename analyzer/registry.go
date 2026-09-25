@@ -123,6 +123,37 @@ func RuleNames() []string {
 	return names
 }
 
+// EvaluatedRuleNames returns the rules the Analyzer runs against a Statement,
+// sorted — the subset of RuleNames() that has a Factory. The config loader
+// uses it to tell an `only:` list that selects nothing runnable from one that
+// narrows the scan, which reads identically in YAML.
+func EvaluatedRuleNames() []string {
+	registryMu.RLock()
+	names := make([]string, 0, len(registry))
+	for n, spec := range registry {
+		if spec.Evaluated() {
+			names = append(names, n)
+		}
+	}
+	registryMu.RUnlock()
+	sort.Strings(names)
+	return names
+}
+
+// RuleDefaultSeverity returns the severity a rule was registered with. ok is
+// false for an unregistered name. The findings built outside the statement
+// path read this rather than repeating a literal, so the registry entry stays
+// the single source of truth for every rule, not just the evaluated ones.
+func RuleDefaultSeverity(name string) (sev Severity, ok bool) {
+	registryMu.RLock()
+	defer registryMu.RUnlock()
+	spec, found := registry[name]
+	if !found {
+		return 0, false
+	}
+	return spec.DefaultSeverity, true
+}
+
 // specs returns all registered specs sorted by name, for deterministic
 // analyzer construction and stable report ordering.
 func specs() []RuleSpec {

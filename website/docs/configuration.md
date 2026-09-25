@@ -83,7 +83,7 @@ scan:
 | `version` | all | Reserved for forward compatibility; always `1` today. |
 | `strict` | all | Make unknown keys, unknown rule names and bad severities fatal instead of warnings. |
 | `rules.disable` | every rule | Rule names to turn off. |
-| `rules.only` | every rule | Whitelist. When non-empty, only these run and `disable` is ignored. |
+| `rules.only` | every rule | Whitelist. When non-empty, a rule must be listed to run — and `disable` still applies to the ones that are, so listing and disabling the same rule disables it. |
 | `rules.severity` | every rule | `info`, `warning`, `critical`, or `off`. |
 | `rules.settings` | rules with tunables | `leading-wildcard.min-length`, `in-list-too-large.max-length`, `large-offset.threshold`, `slow-query.threshold`, `n-plus-one.threshold` / `.window`. See [Rules](rules). |
 | `redact` | all | `false` keeps raw literals in `Result.Query`. See [Redaction](redaction). |
@@ -173,6 +173,9 @@ opts = append(opts, middleware.WithSlowQueryThreshold(time.Second))
 being built at all despite `WithN1Detection`. That is deliberate — `disable`
 is an instruction, not a tuning value, and an operator editing
 `.sqlguard.yml` should be able to silence a noisy rule without a redeploy.
+
+`only:` narrows; it does not override. A rule has to survive both checks, so
+`only: [select-star]` together with `disable: [select-star]` leaves nothing.
 
 ## What `only:` reaches
 

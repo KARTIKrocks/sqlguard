@@ -107,3 +107,54 @@ func TestRuleDisabledExplicitlyHonoursDisable(t *testing.T) {
 		t.Error("an unregistered rule should never read as disabled")
 	}
 }
+
+// TestRuleDefaultSeverityCoversNonEvaluatedRules makes the registry entries
+// for the seven load-bearing. Nothing constructs them, so without a reader
+// their DefaultSeverity would be decorative and the literals at each build
+// site would silently outrank it.
+func TestRuleDefaultSeverityCoversNonEvaluatedRules(t *testing.T) {
+	want := map[string]Severity{
+		"slow-query":      SeverityWarning,
+		"n-plus-one":      SeverityWarning,
+		"seq-scan":        SeverityInfo,
+		"high-cost":       SeverityWarning,
+		"full-table-scan": SeverityWarning,
+		"no-index-used":   SeverityWarning,
+		"filesort":        SeverityInfo,
+	}
+	for name, sev := range want {
+		got, ok := RuleDefaultSeverity(name)
+		if !ok {
+			t.Errorf("%q is not registered", name)
+			continue
+		}
+		if got != sev {
+			t.Errorf("%q default severity = %v, want %v", name, got, sev)
+		}
+	}
+
+	if _, ok := RuleDefaultSeverity("somebody-elses-rule"); ok {
+		t.Error("an unregistered name should report ok=false")
+	}
+}
+
+// TestEvaluatedRuleNamesExcludesTheSeven is what lets config tell an `only:`
+// list that narrows the scan from one that leaves it with nothing to run.
+func TestEvaluatedRuleNamesExcludesTheSeven(t *testing.T) {
+	evaluated := EvaluatedRuleNames()
+	for _, name := range []string{
+		"slow-query", "n-plus-one",
+		"seq-scan", "high-cost", "full-table-scan", "no-index-used", "filesort",
+	} {
+		if slices.Contains(evaluated, name) {
+			t.Errorf("%q has no Factory and should not be listed as evaluated", name)
+		}
+	}
+	if !slices.Contains(evaluated, "select-star") {
+		t.Error("select-star is evaluated and should be listed")
+	}
+	if len(evaluated) != len(RuleNames())-7 {
+		t.Errorf("evaluated=%d, registered=%d; expected exactly 7 non-evaluated",
+			len(evaluated), len(RuleNames()))
+	}
+}

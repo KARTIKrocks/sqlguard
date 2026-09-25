@@ -40,10 +40,17 @@ can be overridden per project.
 | `filesort` | INFO | EXPLAIN (mysql) | `Using filesort` in `Extra` |
 
 _Changed in 0.3._ Every rule in this table is addressable by name in
-[`.sqlguard.yml`](configuration) — `disable`, `only`, `severity` and
-`settings` all work the same for a runtime or plan rule as for a statement
-rule. In 0.2 only the 14 statement rules were: naming any of the other seven
-warned with `unknown rule`, and failed under `strict: true`.
+[`.sqlguard.yml`](configuration): `disable` and `severity` work the same for a
+runtime or plan rule as for a statement rule. In 0.2 only the 14 statement
+rules were — naming any of the other seven warned with `unknown rule`, and
+failed under `strict: true`.
+
+Two qualifications. `only:` applies to the scan and the runtime findings but
+[not to `sqlguard explain`](explain#what-it-detects). And `settings` only
+exists where a rule has a tunable: `leading-wildcard`, `in-list-too-large`,
+`large-offset`, `slow-query` and `n-plus-one` have them; the five plan rules
+have none and their thresholds are fixed, so a `settings` block for one is
+reported as having no effect.
 
 The runtime and plan rules are not evaluated against parsed SQL — middleware
 derives them from latency and fingerprint counts, and `explain` from the

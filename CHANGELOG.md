@@ -53,6 +53,13 @@ the same version in lockstep.
   covers durations and numbers, and a half-specified `n-plus-one` block —
   a quoted `threshold: "10"` is a string in YAML, read back as 0, which would
   have left N+1 detection off with no indication.
+- An `only:` list that names no rule the scanner runs — `only: [slow-query]`,
+  now that it is a valid name — is reported. It would otherwise leave
+  `sqlguard scan` finding nothing on any codebase, which reads as a clean run.
+- A misspelled setting **key** is reported too, not just a bad value: the rule
+  name is known and the value well-formed, so the setting is simply absent and
+  the built-in default stands. A `settings` block on a rule with no tunables
+  (the five plan rules) is reported the same way.
 - An unknown rule name in `disable:` / `only:` / `severity:` / `settings:` is
   now warned about **and ignored**, rather than warned about and honored. One
   typo in `only:` acted as a whitelist matching nothing, which since every
