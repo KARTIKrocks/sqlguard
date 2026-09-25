@@ -1,5 +1,5 @@
-github.com/KARTIKrocks/sqlguard v0.4.0 h1:Z6qUSuEsIMqfw9Ca+Zi2vXrICplPY0x6NwZHIWrSK+A=
-github.com/KARTIKrocks/sqlguard v0.4.0/go.mod h1:5hsSne2+teS/31u3ZEGpemaGMnaKNO2xypkUsny9rYA=
+github.com/KARTIKrocks/sqlguard v0.5.0 h1:qImdj4QU2dVHvGxRdFVSsfbvlVKuyeq7H79kTt6qr88=
+github.com/KARTIKrocks/sqlguard v0.5.0/go.mod h1:5hsSne2+teS/31u3ZEGpemaGMnaKNO2xypkUsny9rYA=
 github.com/jinzhu/inflection v1.0.0 h1:K317FqzuhWc8YvSVlFMCCUb36O/S9MCKRDI7QkRKD/E=
 github.com/jinzhu/inflection v1.0.0/go.mod h1:h+uFLlag+Qp1Va5pdKtLDYj+kHp5pxUVkryuEj+Srlc=
 github.com/jinzhu/now v1.1.5 h1:/o9tlHleP7gOFmsnYNz3RGnqzefHA47wQpKrrdTIwXQ=
