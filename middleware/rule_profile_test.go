@@ -169,3 +169,44 @@ func TestNPlusOne_EnabledBySettings(t *testing.T) {
 		t.Errorf("expected an n-plus-one finding, got %+v", rep.snapshot())
 	}
 }
+
+// TestDisableBeatsExplicitGoOption pins the precedence documented under
+// Configuration → Precedence, and the asymmetry in it: a Go option wins for a
+// *threshold*, but `disable` is an instruction and wins over the Go call, so
+// an operator can silence a noisy rule by editing .sqlguard.yml without a
+// redeploy.
+func TestDisableBeatsExplicitGoOption(t *testing.T) {
+	t.Run("slow-query", func(t *testing.T) {
+		rep := &countingReporter{}
+		g := profileGuard(t, analyzer.Profile{Disabled: map[string]bool{"slow-query": true}}, rep,
+			WithSlowQueryThreshold(time.Millisecond))
+
+		g.CheckLatency("SELECT 1", time.Second)
+
+		if got := rep.snapshot(); len(got) != 0 {
+			t.Errorf("disable should outrank WithSlowQueryThreshold, got %+v", got)
+		}
+	})
+
+	t.Run("n-plus-one", func(t *testing.T) {
+		rep := &countingReporter{}
+		g := profileGuard(t, analyzer.Profile{Disabled: map[string]bool{"n-plus-one": true}}, rep,
+			WithN1Detection(2, time.Minute))
+
+		if g.tracker != nil {
+			t.Error("disable should outrank WithN1Detection")
+		}
+	})
+
+	t.Run("an only list that omits the rule also disables it", func(t *testing.T) {
+		rep := &countingReporter{}
+		g := profileGuard(t, analyzer.Profile{Only: map[string]bool{"select-star": true}}, rep,
+			WithSlowQueryThreshold(time.Millisecond))
+
+		g.CheckLatency("SELECT 1", time.Second)
+
+		if got := rep.snapshot(); len(got) != 0 {
+			t.Errorf("an `only` whitelist omitting slow-query should silence it, got %+v", got)
+		}
+	})
+}

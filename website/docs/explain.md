@@ -85,6 +85,15 @@ In 0.2 `explain` ignored `rules:` entirely, and naming a plan rule in a config
 was an `unknown rule` warning — a hard error under `strict: true`. A
 `severity` override also wins over `seq-scan`'s row-count-derived severity.
 
+:::caution `only:` now reaches EXPLAIN
+
+`only:` is a whitelist across every surface, so a config that uses it to focus
+the static scan — `only: [select-star, delete-without-where]` — leaves no plan
+rule enabled, and `sqlguard explain` reports nothing. If you use `only:` and
+want plan findings, name the plan rules in it too, or use `disable:` instead.
+
+:::
+
 Postgres plans are requested as `EXPLAIN (FORMAT JSON)` and walked
 recursively, so nested scans inside joins and CTEs are found. MySQL plans
 are requested as `EXPLAIN FORMAT=TRADITIONAL` — MySQL 9 defaults

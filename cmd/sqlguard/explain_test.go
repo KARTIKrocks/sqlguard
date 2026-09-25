@@ -1,8 +1,11 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -50,5 +53,42 @@ func TestExplain_AcceptsKnownFormats(t *testing.T) {
 		if strings.Contains(err.Error(), "unknown format") {
 			t.Errorf("format %q was rejected as unknown: %v", f, err)
 		}
+	}
+}
+
+// TestExplain_ConfigErrorsBeforeDialing pins the ordering. Config resolution
+// sat after openDB, so a rule-name typo under `strict: true` cost the full
+// 30-second connect timeout before surfacing — and printed its warnings
+// underneath the connection noise.
+func TestExplain_ConfigErrorsBeforeDialing(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, ".sqlguard.yml")
+	if err := os.WriteFile(cfgPath, []byte("strict: true\nrules:\n  disable: [no-such-rule]\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	oldFormat, oldDSN, oldCfg := explainFormat, explainDSN, configPathFlag
+	explainFormat = "console"
+	// An unroutable address: reaching the dial at all would block for the
+	// timeout, so a prompt return is itself part of the assertion.
+	explainDSN = "postgres://nobody@192.0.2.1:5432/none"
+	configPathFlag = cfgPath
+	t.Cleanup(func() { explainFormat, explainDSN, configPathFlag = oldFormat, oldDSN, oldCfg })
+
+	start := time.Now()
+	err := runExplain(&cobra.Command{}, []string{"SELECT 1"})
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected the strict config to fail the run")
+	}
+	if !strings.Contains(err.Error(), "no-such-rule") {
+		t.Errorf("expected the config error, got %v", err)
+	}
+	if strings.Contains(err.Error(), "failed to connect") {
+		t.Errorf("config was resolved after dialing: %v", err)
+	}
+	if elapsed > 5*time.Second {
+		t.Errorf("took %v; the run reached the dial before failing on config", elapsed)
 	}
 }

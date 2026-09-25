@@ -180,38 +180,59 @@ func (c *Config) Profile() (analyzer.Profile, error) {
 		return nil
 	}
 
-	checkName := func(name string) error {
+	// checkName reports whether the name is usable. In lenient mode an unknown
+	// name warns and is then *ignored* — honouring it would let one typo in
+	// `only:` act as a whitelist that matches nothing, which since 0.3 turns
+	// off the runtime and plan findings too, not just the static scan.
+	checkName := func(name string) (bool, error) {
 		if !known[name] {
-			return warn("unknown rule %q (known: %s)", name, strings.Join(analyzer.RuleNames(), ", "))
+			if err := warn("unknown rule %q (known: %s)", name, strings.Join(analyzer.RuleNames(), ", ")); err != nil {
+				return false, err
+			}
+			return false, nil
 		}
-		return nil
+		return true, nil
 	}
 
-	for _, name := range c.Rules.Disable {
-		if err := checkName(name); err != nil {
-			return p, err
-		}
-		p.Disabled[name] = true
+	if err := collectNames(c.Rules.Disable, p.Disabled, checkName); err != nil {
+		return p, err
 	}
-	for _, name := range c.Rules.Only {
-		if err := checkName(name); err != nil {
-			return p, err
-		}
-		p.Only[name] = true
+	if err := collectNames(c.Rules.Only, p.Only, checkName); err != nil {
+		return p, err
 	}
 	if err := applySeverities(c.Rules.Severity, &p, checkName, warn); err != nil {
 		return p, err
 	}
 	for name, kv := range c.Rules.Settings {
-		if err := checkName(name); err != nil {
+		ok, err := checkName(name)
+		if err != nil {
 			return p, err
 		}
-		if err := checkDurationSettings(name, kv, warn); err != nil {
+		if !ok {
+			continue
+		}
+		if err := checkSettings(name, kv, warn); err != nil {
 			return p, err
 		}
 		p.Settings[name] = analyzer.Settings(kv)
 	}
 	return p, nil
+}
+
+// collectNames adds each usable name to the set. An unknown name is reported
+// by checkName and then left out: warning about a typo and acting on it
+// anyway is how one bad entry in `only:` becomes a whitelist matching nothing.
+func collectNames(names []string, into map[string]bool, checkName func(string) (bool, error)) error {
+	for _, name := range names {
+		ok, err := checkName(name)
+		if err != nil {
+			return err
+		}
+		if ok {
+			into[name] = true
+		}
+	}
+	return nil
 }
 
 // applySeverities resolves the `rules.severity` map onto the profile. A
@@ -221,15 +242,19 @@ func (c *Config) Profile() (analyzer.Profile, error) {
 func applySeverities(
 	sevs map[string]string,
 	p *analyzer.Profile,
-	checkName func(string) error,
+	checkName func(string) (bool, error),
 	warn func(string, ...any) error,
 ) error {
 	for name, sevStr := range sevs {
-		if err := checkName(name); err != nil {
+		ok, err := checkName(name)
+		if err != nil {
 			return err
 		}
-		sev, off, ok := parseSeverity(sevStr)
 		if !ok {
+			continue
+		}
+		sev, off, valid := parseSeverity(sevStr)
+		if !valid {
 			if err := warn("rule %q: invalid severity %q", name, sevStr); err != nil {
 				return err
 			}
@@ -244,32 +269,86 @@ func applySeverities(
 	return nil
 }
 
-// durationSettings names the per-rule settings parsed as Go durations, so a
-// malformed value is reported rather than silently replaced by a default.
-var durationSettings = map[string][]string{
-	"slow-query": {"threshold"},
-	"n-plus-one": {"window"},
+// settingKind is how a per-rule setting is read back, so a value that will not
+// survive the read can be reported here instead of silently becoming a
+// default. analyzer.Settings.Duration and .Int both fall back on a bad value,
+// which would otherwise turn a typo into a wrong threshold — or, for
+// n-plus-one, into detection that never switches on.
+type settingKind int
+
+const (
+	settingDuration settingKind = iota
+	settingInt
+)
+
+// checkedSettings names the settings that are read as something other than an
+// opaque value. Rules whose settings are not listed pass through unchecked.
+var checkedSettings = map[string]map[string]settingKind{
+	"slow-query":        {"threshold": settingDuration},
+	"n-plus-one":        {"threshold": settingInt, "window": settingDuration},
+	"leading-wildcard":  {"min-length": settingInt},
+	"in-list-too-large": {"max-length": settingInt},
+	"large-offset":      {"threshold": settingInt},
 }
 
-// checkDurationSettings reports a duration setting that will not parse.
-// analyzer.Settings.Duration falls back to the caller's default on a bad
-// value, so without this a typo would quietly leave the built-in threshold in
-// place rather than the one the file asked for.
-func checkDurationSettings(rule string, kv map[string]any, warn func(string, ...any) error) error {
-	for _, key := range durationSettings[rule] {
+// pairedSettings names settings that only take effect together. n-plus-one
+// needs both to switch detection on, so half a block is silently inert.
+var pairedSettings = map[string][]string{
+	"n-plus-one": {"threshold", "window"},
+}
+
+// checkSettings reports a setting whose value will not read back as its kind,
+// and a half-specified pair.
+func checkSettings(rule string, kv map[string]any, warn func(string, ...any) error) error {
+	for key, kind := range checkedSettings[rule] {
 		v, present := kv[key]
 		if !present {
 			continue
 		}
+		if err := checkSettingValue(rule, key, kind, v, warn); err != nil {
+			return err
+		}
+	}
+
+	pair := pairedSettings[rule]
+	if len(pair) == 0 {
+		return nil
+	}
+	var have, missing []string
+	for _, key := range pair {
+		if _, present := kv[key]; present {
+			have = append(have, key)
+		} else {
+			missing = append(missing, key)
+		}
+	}
+	if len(have) > 0 && len(missing) > 0 {
+		return warn("rule %q: setting %q has no effect without %q",
+			rule, strings.Join(have, ", "), strings.Join(missing, ", "))
+	}
+	return nil
+}
+
+func checkSettingValue(rule, key string, kind settingKind, v any, warn func(string, ...any) error) error {
+	switch kind {
+	case settingDuration:
 		str, isStr := v.(string)
 		if !isStr {
-			continue // a bare number is milliseconds; Settings handles it
+			return nil // a bare number is milliseconds; Settings handles it
 		}
 		if _, err := time.ParseDuration(strings.TrimSpace(str)); err != nil {
-			if err := warn("rule %q: setting %q: invalid duration %q", rule, key, str); err != nil {
-				return err
-			}
+			return warn("rule %q: setting %q: invalid duration %q", rule, key, str)
 		}
+	case settingInt:
+		switch v.(type) {
+		case int, int64, float64:
+			return nil
+		}
+		// A quoted number is the common YAML slip. Settings.Int does not
+		// accept a string, so it would read back as the default: for
+		// n-plus-one.threshold that means detection never switches on.
+		return warn("rule %q: setting %q: expected a number, got %v (quoted numbers are strings in YAML)",
+			rule, key, v)
 	}
 	return nil
 }

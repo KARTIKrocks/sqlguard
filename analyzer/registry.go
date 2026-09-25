@@ -2,6 +2,7 @@ package analyzer
 
 import (
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -61,7 +62,9 @@ func (s Settings) Duration(key string, def time.Duration) time.Duration {
 	}
 	switch v := s[key].(type) {
 	case string:
-		if d, err := time.ParseDuration(v); err == nil {
+		// Trimmed so this agrees with the config loader's validation; a
+		// value it accepts must not fall back to def here.
+		if d, err := time.ParseDuration(strings.TrimSpace(v)); err == nil {
 			return d
 		}
 	case int:

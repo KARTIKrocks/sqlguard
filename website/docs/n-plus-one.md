@@ -28,7 +28,20 @@ sqlguard.Register("sqlguard-pg", "pgx",
 )
 ```
 
-`WithN1Detection(threshold, window)` is off by default. When enabled, every
+`WithN1Detection(threshold, window)` is off by default. _Added in 0.3._ It can
+also be switched on from [`.sqlguard.yml`](configuration), which is the only
+way to enable it without a code change:
+
+```yaml
+rules:
+  settings:
+    n-plus-one:
+      threshold: 5      # both keys are required; one alone does nothing
+      window: 2s
+```
+
+`WithN1Detection` in code wins over those values, but `disable: [n-plus-one]`
+in the file switches detection off regardless. When enabled, every
 executed statement is reduced to its [fingerprint](redaction) — literals
 replaced, whitespace collapsed, `IN (?, ?, ?)` folded to `IN (?)` — and
 counted. When the same fingerprint reaches `threshold` executions inside

@@ -110,9 +110,9 @@ a rule added in a newer release still loads on an older binary. Set
 _Added in 0.3._ N+1 detection can be turned on from the file. Setting both
 `rules.settings.n-plus-one.threshold` and `.window` enables it; previously it
 was reachable only from Go with `WithN1Detection`, which remains the way to
-set it in code. An explicit Go option wins over the file for both N+1 and
-`slow-query.threshold`, so a deliberate call is never overridden by a config
-that happens to be on disk.
+set it in code. An explicit Go option wins over the file for the N+1 and slow-query
+_thresholds_. Turning either rule off goes the other way — see
+[Precedence](#precedence).
 
 ## Loading it from Go
 
@@ -135,10 +135,10 @@ And on a `*Config`:
 
 | Method | Use |
 | --- | --- |
-| `MiddlewareOptions() ([]middleware.Option, error)` | `WithAnalyzer` from the profile, plus `WithSlowQueryThreshold` / `WithFindingDedup` when set. Append your own options after it. |
+| `MiddlewareOptions() ([]middleware.Option, error)` | `WithAnalyzer` from the profile — which carries the rule settings, including the slow-query and N+1 tunables — plus `WithFindingDedup` when set. Append your own options after it. |
 | `Analyzer() (*analyzer.Analyzer, error)` | `analyzer.DefaultWithProfile` built from this file. |
 | `Profile() (analyzer.Profile, error)` | The resolved, parser-independent profile. |
-| `SlowQueryThreshold()`, `DedupWindow()` | `(time.Duration, ok bool, error)` — `ok` is false when the key is unset. |
+| `DedupWindow()` | `(time.Duration, ok bool, error)` — `ok` is false when the key is unset. _Changed in 0.3._ `SlowQueryThreshold()` is gone; read `Profile().Settings["slow-query"].Duration("threshold", d)` instead. |
 | `ExcludeMatcher() (func(path string) bool, error)` | The compiled `scan.exclude-paths` predicate. |
 | `Warnings() []string` | Non-fatal problems found while loading. Surface them. |
 
@@ -155,8 +155,24 @@ sqlguard.Register("sqlguard-pg", "pgx", opts...)
 
 ## Precedence
 
-Options given in code after `MiddlewareOptions()` win, because
-`middleware.Option`s apply in order. So `append(opts,
-middleware.WithSlowQueryThreshold(time.Second))` overrides the file's
-`slow-query.threshold`. Inline [suppressions](suppressions) always win over
-both: they silence a finding at one site regardless of config.
+_Changed in 0.3._ For the **thresholds**, an explicit Go option wins over the
+file wherever it appears in the list — `WithSlowQueryThreshold` and
+`WithN1Detection` record that they were called, so a config value no longer
+has to be ordered around. In 0.2 this depended on option order, because the
+file's threshold arrived as an option of its own.
+
+```go
+opts, _ := cfg.MiddlewareOptions()
+opts = append(opts, middleware.WithSlowQueryThreshold(time.Second))
+// 1s, whatever rules.settings.slow-query.threshold says
+```
+
+**Turning a rule off is the other way round: the file wins.** `disable:
+[slow-query]` or an `only:` list that omits it silences the finding even with
+`WithSlowQueryThreshold` set, and `disable: [n-plus-one]` stops the tracker
+being built at all despite `WithN1Detection`. That is deliberate — `disable`
+is an instruction, not a tuning value, and an operator editing
+`.sqlguard.yml` should be able to silence a noisy rule without a redeploy.
+
+Inline [suppressions](suppressions) win over both: they silence a finding at
+one site regardless of config.

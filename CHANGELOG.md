@@ -39,13 +39,24 @@ the same version in lockstep.
   `WithSlowQueryThreshold` in Go still wins over the file.
 - **`explain` now honors `rules:` config.** It previously ignored it by
   design, which is what its docs said. A `severity` override also beats
-  `seq-scan`'s row-count-derived severity.
+  `seq-scan`'s row-count-derived severity. **Note that `only:` reaches
+  EXPLAIN too**: a config using `only:` to focus the static scan now leaves no
+  plan rule enabled, so `sqlguard explain` reports nothing until the plan
+  rules are named in it (or `disable:` is used instead).
 - **N+1 detection can be enabled from the config file.** Setting both
   `rules.settings.n-plus-one.threshold` and `.window` turns it on; it was
   previously reachable only from Go via `WithN1Detection`, which still takes
   precedence.
-- A duration in `rules.settings` that does not parse is now reported instead
-  of being silently replaced by the built-in default.
+- A value in `rules.settings` that will not read back as its type is now
+  reported instead of being silently replaced by the built-in default. This
+  covers durations and numbers, and a half-specified `n-plus-one` block —
+  a quoted `threshold: "10"` is a string in YAML, read back as 0, which would
+  have left N+1 detection off with no indication.
+- An unknown rule name in `disable:` / `only:` / `severity:` / `settings:` is
+  now warned about **and ignored**, rather than warned about and honored. One
+  typo in `only:` acted as a whitelist matching nothing, which since every
+  rule became addressable would have silenced the runtime and plan findings
+  as well as the static scan.
 
 - README restructured as a landing page: logo, "Why sqlguard?" comparison,
   quick start, and a guide index pointing at the docs site. The deep

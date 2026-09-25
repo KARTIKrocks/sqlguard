@@ -192,8 +192,11 @@ legitimate query.
 ### `n-plus-one`
 
 Emitted by the middleware when the same query fingerprint executes
-`threshold` times inside `window`. Off unless `WithN1Detection` is set.
-Full description in [N+1 detection](n-plus-one).
+`threshold` times inside `window`. Off unless it is switched on — with
+`WithN1Detection` in Go, or by setting both
+`rules.settings.n-plus-one.threshold` and `.window` in
+[config](configuration) _0.3+_. Full description in
+[N+1 detection](n-plus-one).
 
 > **Fix:** Consider using a `JOIN` or `IN` clause to batch these queries.
 
@@ -201,7 +204,8 @@ Full description in [N+1 detection](n-plus-one).
 
 Emitted when a successful query's latency, measured at the driver, reaches
 the threshold (`WithSlowQueryThreshold`, default 200 ms; or
-`slow-query.threshold` in config). The message includes the measured time
+`rules.settings.slow-query.threshold` in config — _changed in 0.3_, this was
+a top-level `slow-query.threshold` key). The message includes the measured time
 and the threshold. Reported on every slow execution — it is not
 [de-duplicated](noise-control).
 
@@ -209,8 +213,10 @@ and the threshold. Reported on every slow execution — it is not
 
 ## EXPLAIN rules
 
-Produced by [`sqlguard explain`](explain) from the query plan. They are not
-configurable through `rules:` in `.sqlguard.yml`.
+Produced by [`sqlguard explain`](explain) from the query plan. _Changed in
+0.3._ These are configurable through `rules:` in `.sqlguard.yml` like any
+other rule; in 0.2 they were not, and naming one was an `unknown rule`
+warning.
 
 ### `seq-scan` (PostgreSQL)
 

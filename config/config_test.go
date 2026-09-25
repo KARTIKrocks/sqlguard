@@ -227,33 +227,46 @@ func TestProfile_AcceptsNonEvaluatedRules(t *testing.T) {
 	}
 }
 
-// TestProfile_ValidatesDurationSettings guards a trap introduced by moving the
-// threshold into settings: analyzer.Settings.Duration falls back to the
-// caller's default when a value does not parse, so without this check a typo
-// would silently leave the built-in 200ms in place.
-func TestProfile_ValidatesDurationSettings(t *testing.T) {
-	t.Run("strict fails", func(t *testing.T) {
-		c := &Config{Strict: true, Rules: RulesConfig{Settings: map[string]map[string]any{
-			"slow-query": {"threshold": "200mss"},
-		}}}
-		if _, err := c.Profile(); err == nil {
-			t.Fatal("expected an error for an unparseable duration")
-		}
-	})
+// TestProfile_ValidatesSettings guards the trap that moving tunables into
+// settings creates: analyzer.Settings.Duration and .Int both fall back to the
+// caller's default on a value they cannot read, so an unchecked typo becomes a
+// silently wrong threshold — or, for n-plus-one, detection that never switches
+// on at all.
+func TestProfile_ValidatesSettings(t *testing.T) {
+	cases := []struct {
+		name     string
+		settings map[string]map[string]any
+		warnings int
+	}{
+		{"unparseable duration", map[string]map[string]any{
+			"slow-query": {"threshold": "200mss"}}, 1},
+		{"quoted number reads back as the default", map[string]map[string]any{
+			"n-plus-one": {"threshold": "10", "window": "1m"}}, 1},
+		{"half a paired block is inert", map[string]map[string]any{
+			"n-plus-one": {"window": "1m"}}, 1},
+		{"quoted int on a statement rule", map[string]map[string]any{
+			"leading-wildcard": {"min-length": "4"}}, 1},
+	}
 
-	t.Run("lenient warns", func(t *testing.T) {
-		c := &Config{Rules: RulesConfig{Settings: map[string]map[string]any{
-			"n-plus-one": {"window": "1minute"},
-		}}}
-		if _, err := c.Profile(); err != nil {
-			t.Fatalf("lenient mode should not fail: %v", err)
-		}
-		if len(c.Warnings()) != 1 {
-			t.Errorf("expected one warning, got %v", c.Warnings())
-		}
-	})
+	for _, tc := range cases {
+		t.Run(tc.name+" (lenient warns)", func(t *testing.T) {
+			c := &Config{Rules: RulesConfig{Settings: tc.settings}}
+			if _, err := c.Profile(); err != nil {
+				t.Fatalf("lenient mode should not fail: %v", err)
+			}
+			if len(c.Warnings()) != tc.warnings {
+				t.Errorf("expected %d warning(s), got %v", tc.warnings, c.Warnings())
+			}
+		})
+		t.Run(tc.name+" (strict fails)", func(t *testing.T) {
+			c := &Config{Strict: true, Rules: RulesConfig{Settings: tc.settings}}
+			if _, err := c.Profile(); err == nil {
+				t.Fatal("expected strict mode to reject it")
+			}
+		})
+	}
 
-	t.Run("valid duration and bare number pass", func(t *testing.T) {
+	t.Run("valid settings pass", func(t *testing.T) {
 		c := &Config{Strict: true, Rules: RulesConfig{Settings: map[string]map[string]any{
 			"slow-query": {"threshold": "1s"},
 			"n-plus-one": {"window": 500, "threshold": 10},
@@ -262,4 +275,48 @@ func TestProfile_ValidatesDurationSettings(t *testing.T) {
 			t.Fatalf("valid settings rejected: %v", err)
 		}
 	})
+
+	// Surrounding whitespace must not pass validation and then fall back at
+	// read time: the check and the read have to agree on the same value.
+	t.Run("padded duration survives the round trip", func(t *testing.T) {
+		c := &Config{Strict: true, Rules: RulesConfig{Settings: map[string]map[string]any{
+			"slow-query": {"threshold": " 500ms "},
+		}}}
+		p, err := c.Profile()
+		if err != nil {
+			t.Fatalf("a padded duration should be accepted: %v", err)
+		}
+		if d := p.Settings["slow-query"].Duration("threshold", time.Second); d != 500*time.Millisecond {
+			t.Errorf("read back %v, want 500ms — the check and the read disagree", d)
+		}
+	})
+}
+
+// TestProfile_UnknownNameIsIgnoredNotHonoured pins the blast radius of a typo.
+// A warned-about name must not take effect: an unknown entry in `only:` would
+// otherwise act as a whitelist matching nothing, which since every rule became
+// addressable also silences the runtime and plan findings.
+func TestProfile_UnknownNameIsIgnoredNotHonoured(t *testing.T) {
+	c := &Config{Rules: RulesConfig{Only: []string{"slect-star"}}}
+
+	p, err := c.Profile()
+	if err != nil {
+		t.Fatalf("lenient mode should not fail: %v", err)
+	}
+	if len(c.Warnings()) != 1 {
+		t.Errorf("expected one warning, got %v", c.Warnings())
+	}
+	if len(p.Only) != 0 {
+		t.Errorf("an unknown name entered the whitelist: %v", p.Only)
+	}
+
+	a := analyzer.DefaultWithProfile(p)
+	if len(a.Analyze("SELECT * FROM t")) == 0 {
+		t.Error("a typo in only: silenced the static rules")
+	}
+	for _, name := range []string{"slow-query", "n-plus-one", "seq-scan"} {
+		if !a.RuleEnabled(name) {
+			t.Errorf("a typo in only: silenced %q", name)
+		}
+	}
 }
