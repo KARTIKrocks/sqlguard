@@ -119,6 +119,14 @@ func TestCheckInsertWithoutColumns(t *testing.T) {
 		{"mysql set form", "INSERT INTO users SET name = 'alice', email = 'a@test.com'", false},
 		{"default values", "INSERT INTO users DEFAULT VALUES", false},
 		{"cte insert no columns", "WITH s AS (SELECT 1) INSERT INTO users SELECT * FROM s", true},
+		// REPLACE is MySQL/SQLite's insert-or-overwrite; positionally it is an
+		// INSERT and carries the same column-order risk. A real MySQL grammar
+		// parses it into the same AST node, so reading it as StmtOther here
+		// made the rule fire only for callers who opted into mysqlparser.
+		{"replace no columns", "REPLACE INTO users VALUES ('alice')", true},
+		{"replace with columns", "REPLACE INTO users (name) VALUES ('alice')", false},
+		// REPLACE(str, from, to) is a string function, not a statement.
+		{"replace function is not a statement", "SELECT REPLACE(name, 'a', 'b') FROM users", false},
 	}
 
 	for _, tt := range tests {

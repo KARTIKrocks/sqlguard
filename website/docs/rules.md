@@ -175,7 +175,13 @@ Same as above for `UPDATE`.
 
 `INSERT INTO t VALUES (…)` and `INSERT INTO t SELECT …` bind positionally
 to the table's column order. Adding, dropping or reordering a column
-silently shifts every value.
+silently shifts every value. MySQL/SQLite's `REPLACE INTO t VALUES (…)`
+binds the same way and is flagged too — _0.5+_.
+
+Forms that name their columns, or have none to name, are not flagged:
+MySQL's `INSERT INTO t SET col = …`, and PostgreSQL's
+`INSERT INTO t DEFAULT VALUES`, which writes no caller-supplied values at
+all.
 
 > **Fix:** Specify columns explicitly: `INSERT INTO table (col1, col2) VALUES (…)`.
 

@@ -37,7 +37,14 @@ var (
 	// singular VALUE; SELECT/WITH/TABLE cover INSERT ... SELECT and friends.
 	fbInsertDataRe = regexp.MustCompile(`(?i)\b(VALUES?|SELECT|WITH|TABLE|SET|DEFAULT)\b`)
 	fbLeadKindRe   = regexp.MustCompile(`(?i)^\s*\(*\s*(SELECT|INSERT|UPDATE|DELETE|WITH)\b`)
-	fbDMLWordRe    = regexp.MustCompile(`(?i)\b(INSERT|UPDATE|DELETE)\b`)
+	// fbReplaceIntoRe recognizes MySQL/SQLite's REPLACE, which carries the same
+	// positional column-order risk as INSERT and is the same AST node to a real
+	// MySQL grammar. INTO is required here although the dialects make it
+	// optional: it disambiguates the statement from the REPLACE(str, a, b)
+	// function, and the INTO-less form is one insertColumnsListed already
+	// declines to flag (it looks for the span after INTO).
+	fbReplaceIntoRe = regexp.MustCompile(`(?i)^\s*\(*\s*REPLACE\s+INTO\b`)
+	fbDMLWordRe     = regexp.MustCompile(`(?i)\b(INSERT|UPDATE|DELETE)\b`)
 
 	// fbWhereRegionEndRe marks the first clause keyword that ends the WHERE
 	// region, so a function in ORDER BY / GROUP BY / HAVING isn't read as a
@@ -448,6 +455,9 @@ func parenDepthBefore(s string, idx int) int {
 func detectKind(sanitized string) StmtKind {
 	m := fbLeadKindRe.FindStringSubmatch(sanitized)
 	if m == nil {
+		if fbReplaceIntoRe.MatchString(sanitized) {
+			return StmtInsert
+		}
 		return StmtOther
 	}
 	switch strings.ToUpper(m[1]) {

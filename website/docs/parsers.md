@@ -76,6 +76,15 @@ The first group is the false-positive-prone set; those become exact
 regardless of the parser, and each field's doc comment says so. This is a
 documented carve-out, not a gap waiting to be closed.
 
+**A dialect parser only ever removes findings** — _0.5+_. Opting in can
+drop a finding the heuristics guessed wrong, but it never reports one the
+fallback would not have. Each parser module pins this against a corpus
+(`TestParser_NeverAddsFindingTheFallbackDoesNot`), so a rule that reads a
+structural field the grammar fills differently from the fallback fails
+there rather than reaching you. Before 0.4, `pgparser` reported
+`insert-without-columns` on `INSERT INTO t DEFAULT VALUES`, which the
+fallback correctly ignores.
+
 ## Degradation on parse failure
 
 A real grammar will reject SQL it does not know: dynamic fragments, a

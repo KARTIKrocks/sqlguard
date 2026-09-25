@@ -149,3 +149,75 @@ func TestParser_IntegratesWithAnalyzer(t *testing.T) {
 		t.Errorf("expected update-without-where (WHERE only in comment), got %+v", got)
 	}
 }
+
+// TestParser_NeverAddsFindingTheFallbackDoesNot pins the direction of the
+// trade-off website/docs/parsers.md promises: opting into the real grammar
+// removes findings the heuristics guessed wrong, and never adds one the
+// zero-dependency default would not have produced. A statement kind the
+// grammar understands but the heuristics did not is the shape that breaks it —
+// vitess parses REPLACE into the same node as INSERT, so it was reported
+// against a statement the fallback read as StmtOther (#68).
+//
+// The REPLACE cases need the fallback's matching REPLACE handling, which is a
+// core change landing in the same release as this test. Under GOWORK=off this
+// module compiles against the core its go.mod requires — v0.4.0, which
+// predates it — so REPLACE_INTO_t_VALUES fails there until the lockstep tag
+// pins the core to the release carrying both. That failure is the go.work
+// mechanism reporting a real version skew, not a flake: the pinned pair passes.
+func TestParser_NeverAddsFindingTheFallbackDoesNot(t *testing.T) {
+	// Fallback-only findings are expected and allowed: they are the false
+	// positives the grammar exists to drop.
+	corpus := []string{
+		"INSERT INTO t SET a = 1",
+		"INSERT INTO t (a, b) VALUES (1, 2)",
+		"INSERT INTO t VALUES (1, 2)",
+		"INSERT INTO t (a) SELECT x FROM u",
+		"INSERT INTO t (a) VALUES (1) ON DUPLICATE KEY UPDATE a = 2",
+		"REPLACE INTO t (a) VALUES (1)",
+		"REPLACE INTO t VALUES (1)",
+		"SELECT * FROM users",
+		"SELECT id FROM users WHERE id = 1",
+		"SELECT id FROM users ORDER BY id",
+		"SELECT DISTINCT id FROM users LIMIT 10",
+		"SELECT 1",
+		"DELETE FROM t",
+		"DELETE FROM t WHERE id = 1",
+		"UPDATE t SET a = 1",
+		"UPDATE t SET a = 1 WHERE id = 2",
+		"ALTER TABLE t ADD COLUMN c INT NOT NULL",
+		"CREATE TABLE t (id INT)",
+		"DROP TABLE t",
+		"TRUNCATE TABLE t",
+		"BEGIN",
+		"COMMIT",
+		"SET autocommit = 1",
+		"SELECT a FROM t LIMIT 5000, 10",
+		"SELECT a FROM t, u",
+		"SELECT a FROM t WHERE a IN (1, 2, 3)",
+		"SELECT a FROM t WHERE name LIKE '%abc%'",
+		"SELECT `a` FROM `t`",
+		"(SELECT a FROM t) UNION (SELECT b FROM u)",
+	}
+
+	fallback := analyzer.Default()
+	exact := analyzer.Default().WithParser(New())
+
+	for _, sql := range corpus {
+		t.Run(sql, func(t *testing.T) {
+			base := ruleSet(fallback.Analyze(sql))
+			for name := range ruleSet(exact.Analyze(sql)) {
+				if _, ok := base[name]; !ok {
+					t.Errorf("mysqlparser reports %q, the fallback does not", name)
+				}
+			}
+		})
+	}
+}
+
+func ruleSet(rs []analyzer.Result) map[string]struct{} {
+	out := make(map[string]struct{}, len(rs))
+	for _, r := range rs {
+		out[r.RuleName] = struct{}{}
+	}
+	return out
+}

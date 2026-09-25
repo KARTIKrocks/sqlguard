@@ -9,6 +9,35 @@ the same version in lockstep.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`pgparser` no longer reports `insert-without-columns` on
+  `INSERT INTO t DEFAULT VALUES`** ([#68]). The grammar encodes that form as
+  an absent row source, and the parser refilled `InsertColumnsListed` from
+  `len(Columns)` alone after blanking it — so the AST path dropped the
+  fallback's explicit handling ("DEFAULT VALUES inserts no data") and then
+  marked the result `Exact`. Opting into the exact parser made this rule
+  strictly worse than the zero-dependency default, inverting the trade-off
+  documented in [SQL Parsers](https://kartikrocks.github.io/sqlguard/docs/parsers).
+- **`REPLACE INTO t VALUES (…)` is now flagged by `insert-without-columns`.**
+  MySQL/SQLite's `REPLACE` binds positionally exactly as `INSERT` does and
+  carries the same column-order risk, and a real MySQL grammar parses it into
+  the same AST node — so `mysqlparser` already reported it while the
+  zero-dependency fallback read it as an unrecognized statement kind and said
+  nothing. `REPLACE INTO t (a) VALUES (…)` is not flagged, and the
+  `REPLACE(str, from, to)` string function is never mistaken for a statement.
+
+### Added
+
+- **Parser parity is pinned by a test.** `pgparser` and `mysqlparser` each run
+  a corpus through both the dialect grammar and the fallback and assert the
+  grammar never reports a rule the fallback does not
+  (`TestParser_NeverAddsFindingTheFallbackDoesNot`). Opting into a real parser
+  can only remove findings, which is the direction the docs promise; both bugs
+  above are instances of the same shape, and only one had been noticed.
+
+[#68]: https://github.com/KARTIKrocks/sqlguard/issues/68
+
 ## [0.4.0] - 2026-09-25
 
 ### Changed

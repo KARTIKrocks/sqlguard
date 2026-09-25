@@ -87,11 +87,20 @@ func (p *Parser) Parse(sql string) (*analyzer.Statement, error) {
 		st.OffsetValue = offsetValue(n.Limit)
 	case *tree.Insert:
 		st.Kind = analyzer.StmtInsert
-		st.InsertColumnsListed = len(n.Columns) > 0
+		st.InsertColumnsListed = len(n.Columns) > 0 || defaultValues(n)
 	}
 
 	st.Exact = true
 	return st, nil
+}
+
+// defaultValues reports whether an INSERT is the "DEFAULT VALUES" form, which
+// the grammar encodes as an absent row source. It names no columns and needs
+// none — it inserts no data, so there is no positional column-order risk for
+// insert-without-columns to warn about, matching the FallbackParser. tree's own
+// Insert.DefaultValues dereferences Rows unguarded, hence the nil check here.
+func defaultValues(n *tree.Insert) bool {
+	return n.Rows == nil || n.Rows.Select == nil
 }
 
 // fillSelectBody unwraps the inner SelectStatement of a *tree.Select.
