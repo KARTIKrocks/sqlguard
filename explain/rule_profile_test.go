@@ -131,10 +131,7 @@ func TestPlanSeverity_EscalationOnlyGoesUp(t *testing.T) {
 	}
 
 	// The escalation branch must not lower it.
-	wide := base
-	if wide < analyzer.SeverityWarning {
-		wide = analyzer.SeverityWarning
-	}
+	wide := max(base, analyzer.SeverityWarning)
 	if wide < base {
 		t.Errorf("a wide scan reported %v, below the registered %v", wide, base)
 	}
