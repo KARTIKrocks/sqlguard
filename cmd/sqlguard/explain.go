@@ -40,12 +40,24 @@ func runExplain(cmd *cobra.Command, args []string) error {
 
 	query := args[0]
 
-	// Validate the format before dialing: a typo should cost an error message,
-	// not a connection attempt followed by a silent fall back to console.
+	// Everything that can fail on the user's own input is resolved before
+	// dialing: a bad --format or a rule-name typo under `strict: true` should
+	// cost an error message, not a connection attempt first. The config
+	// warnings print here for the same reason — after the dial they arrive
+	// buried in connection noise.
 	rep, writeErr, err := newReporter(explainFormat)
 	if err != nil {
 		return err
 	}
+	cfg, err := resolveConfig(".")
+	if err != nil {
+		return err
+	}
+	a, err := cfg.Analyzer()
+	if err != nil {
+		return err
+	}
+	printConfigWarnings(cfg)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -56,7 +68,7 @@ func runExplain(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = db.Close() }()
 
-	var explainOpts []explain.Option
+	explainOpts := []explain.Option{explain.WithAnalyzer(a)}
 	if explainAllowDML {
 		explainOpts = append(explainOpts, explain.WithAllowDML())
 	}

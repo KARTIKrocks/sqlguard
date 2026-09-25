@@ -16,7 +16,12 @@ rules:
   disable:
     - orderby-without-limit
 
-  # Whitelist mode: when non-empty, ONLY these rules run (disable is ignored).
+  # Whitelist mode: when non-empty, a rule must be listed to run. It narrows
+  # the rules evaluated against a statement — the scanner and the runtime
+  # statement rules — and does NOT reach slow-query, n-plus-one or the EXPLAIN
+  # plan rules; switch one of those off by naming it in `disable` above.
+  # `disable` still applies to the rules listed here, so listing and disabling
+  # the same rule disables it.
   # only:
   #   - delete-without-where
   #   - update-without-where
@@ -42,16 +47,26 @@ rules:
       # Parameterized offsets (OFFSET $1 / ?) can't be evaluated statically.
       threshold: 1000
 
+    # Runtime (middleware/integrations). These two rules are not evaluated
+    # against parsed SQL, so they never fire during `sqlguard scan` — but they
+    # are ordinary rule names, so `disable`, `only` and `severity` above reach
+    # them too.
+    slow-query:
+      # Flag a query whose driver-measured latency reaches this. Default
+      # 200ms. WithSlowQueryThreshold in Go wins over this.
+      threshold: 200ms
+    n-plus-one:
+      # Setting BOTH of these turns N+1 detection on; it is off otherwise.
+      # WithN1Detection in Go wins over this.
+      threshold: 10       # this many executions of one fingerprint...
+      window: 1m          # ...within this window
+
 # Redact literal values (strings/numbers) out of Result.Query before it
 # reaches any reporter/log. ON by default — leave it on so customer data in
 # query literals never lands in your logs. Result.Fingerprint (a PII-free,
 # value-free query identity) is emitted regardless. Set to false ONLY for
 # local debugging where the query text is trusted.
 redact: true
-
-# Runtime slow-query threshold (middleware). Go duration string.
-slow-query:
-  threshold: 200ms
 
 # Runtime de-duplication of repeated static findings (middleware). The same
 # finding (rule + query fingerprint) is reported at most once per window, so a

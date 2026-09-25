@@ -9,6 +9,70 @@ the same version in lockstep.
 
 ## [Unreleased]
 
+### Changed
+
+- **Every documented rule is now addressable in `.sqlguard.yml`.** The rules
+  reference lists 21 rules, but only the 14 statement rules were registered:
+  naming `slow-query`, `n-plus-one`, `seq-scan`, `high-cost`,
+  `full-table-scan`, `no-index-used` or `filesort` under `disable`, `only`,
+  `severity` or `settings` warned with `unknown rule`, and failed outright
+  under `strict: true`. All seven are registered now, and the profile reaches
+  the runtime findings in middleware and the plan findings in `explain`
+  exactly as it reaches a statement rule. They are still never evaluated
+  against parsed SQL, so they do not fire during `sqlguard scan`.
+- **Breaking (Go API): `middleware.NewQueryTracker` takes a severity.** The
+  signature is now `NewQueryTracker(threshold, window, severity, reportFn)`.
+  It is exported, so a caller constructing a tracker directly will not
+  compile until the argument is added; pass `analyzer.SeverityWarning` for
+  the previous behaviour. Guard resolves it from the profile, which is what
+  makes a `severity:` override on `n-plus-one` reach the finding.
+- **Breaking (config): the slow-query threshold moved** from the top-level
+  `slow-query.threshold` key to `rules.settings.slow-query.threshold`, so
+  every per-rule tunable lives in one place. `Config.SlowQueryThreshold` and
+  the `SlowQueryConfig` type are gone with it. An explicit
+  `WithSlowQueryThreshold` in Go still wins over the file.
+- **`explain` now honors `rules:` config.** It previously ignored it by
+  design, which is what its docs said. A `severity` override also beats
+  `seq-scan`'s row-count-derived severity.
+- **`only:` is scoped to the rules evaluated against a statement.** It
+  narrows the scanner and the statement rules at runtime, and deliberately
+  does not reach `slow-query`, `n-plus-one` or the five plan rules. A
+  whitelist is written to focus a scan and names statement rules; if it
+  reached the rest, `only: [select-star]` in a repository's config would also
+  switch off latency and N+1 reporting in the running application and make
+  `sqlguard explain` report nothing, without naming any of them and without
+  warning. `disable:` and `severity: off` reach every surface.
+- **N+1 detection can be enabled from the config file.** Setting both
+  `rules.settings.n-plus-one.threshold` and `.window` turns it on; it was
+  previously reachable only from Go via `WithN1Detection`, which still takes
+  precedence.
+- A value in `rules.settings` that will not read back as its type is now
+  reported **and dropped**, so the rule falls back to its built-in default
+  rather than acting on the rejected value. In lenient mode the load continues
+  after a warning, so reporting alone was half an answer:
+  `slow-query.threshold: 0` warned and then matched every successful query
+  anyway, flooding the reporter it exists to protect. This
+  covers durations and numbers, and a half-specified `n-plus-one` block —
+  a quoted `threshold: "10"` is a string in YAML, read back as 0, which would
+  have left N+1 detection off with no indication.
+- An `only:` list that names no rule the scanner runs — `only: [slow-query]`,
+  now that it is a valid name — is reported. It would otherwise leave
+  `sqlguard scan` finding nothing on any codebase, which reads as a clean run.
+- A non-positive `slow-query.threshold` or `n-plus-one.window` is reported. A
+  threshold of `0` matches every successful query, so it would have flooded
+  the reporter with `slow-query` on every statement; a zero window leaves N+1
+  off. A fractional-millisecond threshold such as `0.5` also truncated to zero
+  when read, which produced the same flood — it now scales before converting.
+- A misspelled setting **key** is reported too, not just a bad value: the rule
+  name is known and the value well-formed, so the setting is simply absent and
+  the built-in default stands. A `settings` block on a rule with no tunables
+  (the five plan rules) is reported the same way.
+- An unknown rule name in `disable:` / `only:` / `severity:` / `settings:` is
+  now warned about **and ignored**, rather than warned about and honored. One
+  typo in `only:` acted as a whitelist matching nothing, which since every
+  rule became addressable would have silenced the runtime and plan findings
+  as well as the static scan.
+
 ## [0.3.0] - 2026-09-25
 
 ### Added

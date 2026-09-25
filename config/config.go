@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -29,12 +30,11 @@ var ConfigFileNames = []string{".sqlguard.yml", ".sqlguard.yaml"}
 // forward compatibility: older binaries reading a newer config degrade with
 // warnings rather than failing, unless Strict is set.
 type Config struct {
-	Version   int             `yaml:"version"`
-	Strict    bool            `yaml:"strict"`
-	Rules     RulesConfig     `yaml:"rules"`
-	SlowQuery SlowQueryConfig `yaml:"slow-query"`
-	Dedup     DedupConfig     `yaml:"dedup"`
-	Scan      ScanConfig      `yaml:"scan"`
+	Version int         `yaml:"version"`
+	Strict  bool        `yaml:"strict"`
+	Rules   RulesConfig `yaml:"rules"`
+	Dedup   DedupConfig `yaml:"dedup"`
+	Scan    ScanConfig  `yaml:"scan"`
 	// Redact controls Result.Query literal redaction. Pointer so an unset
 	// key means "use the safe default" (redact). Set `redact: false` only
 	// when the query text is trusted (local debugging).
@@ -55,12 +55,6 @@ type RulesConfig struct {
 	Severity map[string]string `yaml:"severity"`
 	// Settings holds per-rule tunables, e.g. leading-wildcard.min-length.
 	Settings map[string]map[string]any `yaml:"settings"`
-}
-
-// SlowQueryConfig configures the middleware slow-query threshold.
-type SlowQueryConfig struct {
-	// Threshold is a Go duration string, e.g. "200ms".
-	Threshold string `yaml:"threshold"`
 }
 
 // DedupConfig configures runtime suppression of repeated static findings.
@@ -187,33 +181,128 @@ func (c *Config) Profile() (analyzer.Profile, error) {
 		return nil
 	}
 
-	checkName := func(name string) error {
+	// checkName reports whether the name is usable. In lenient mode an unknown
+	// name warns and is then *ignored* — honouring it would let one typo in
+	// `only:` act as a whitelist that matches nothing, which since 0.3 turns
+	// off the runtime and plan findings too, not just the static scan.
+	checkName := func(name string) (bool, error) {
 		if !known[name] {
-			return warn("unknown rule %q (known: %s)", name, strings.Join(analyzer.RuleNames(), ", "))
+			if err := warn("unknown rule %q (known: %s)", name, strings.Join(analyzer.RuleNames(), ", ")); err != nil {
+				return false, err
+			}
+			return false, nil
 		}
-		return nil
+		return true, nil
 	}
 
-	for _, name := range c.Rules.Disable {
-		if err := checkName(name); err != nil {
-			return p, err
-		}
-		p.Disabled[name] = true
+	if err := collectNames(c.Rules.Disable, p.Disabled, checkName); err != nil {
+		return p, err
 	}
-	for _, name := range c.Rules.Only {
-		if err := checkName(name); err != nil {
-			return p, err
-		}
-		p.Only[name] = true
+	if err := collectNames(c.Rules.Only, p.Only, checkName); err != nil {
+		return p, err
 	}
-	for name, sevStr := range c.Rules.Severity {
-		if err := checkName(name); err != nil {
+
+	if err := applySeverities(c.Rules.Severity, &p, checkName, warn); err != nil {
+		return p, err
+	}
+	if err := checkScanHasRules(c.Rules.Only, p, warn); err != nil {
+		return p, err
+	}
+
+	for name, kv := range c.Rules.Settings {
+		ok, err := checkName(name)
+		if err != nil {
 			return p, err
 		}
-		sev, off, ok := parseSeverity(sevStr)
 		if !ok {
+			continue
+		}
+		kept, err := checkSettings(name, kv, warn)
+		if err != nil {
+			return p, err
+		}
+		if len(kept) > 0 {
+			p.Settings[name] = kept
+		}
+	}
+	return p, nil
+}
+
+// checkScanHasRules reports an `only:` list that leaves the scanner with
+// nothing to run. It asks the profile the same question the Analyzer does —
+// does any evaluated rule survive Skip — rather than testing the list against
+// EvaluatedRuleNames, which was blind to a name that `only:` selects and
+// `disable:` (or `severity: off`) then takes away again.
+//
+// Three shapes reach here:
+//
+//   - `only: [slow-query]` — valid names now that every documented rule is
+//     addressable, but none of them runs over a statement.
+//   - `only: [select-star]` with `disable: [select-star]` — the whitelist
+//     excludes everything else and the disabled set removes the remainder.
+//   - `only: [selct-star]` — every name unknown, so the whitelist resolves to
+//     empty; an empty whitelist is not a whitelist, and *every* rule runs,
+//     which is the opposite of the narrowing that was asked for.
+//
+// All three report nothing on any codebase, which reads as a clean scan.
+//
+// The check is gated on `only:` being configured. Disabling every rule without
+// one is a deliberate act — using sqlguard purely for its runtime findings is
+// a legitimate setup — and does not deserve a warning.
+func checkScanHasRules(configuredOnly []string, p analyzer.Profile, warn func(string, ...any) error) error {
+	if len(configuredOnly) == 0 {
+		return nil
+	}
+	if len(p.Only) == 0 {
+		return warn("rules.only named no rule that exists, so it selects nothing and every rule runs")
+	}
+	for _, name := range analyzer.EvaluatedRuleNames() {
+		if !p.Skip(name) {
+			return nil
+		}
+	}
+	return warn("rules.only leaves no rule that runs over a statement, so nothing will be scanned " +
+		"(runtime and EXPLAIN rules are reported by the middleware and `sqlguard explain`, not the scanner)")
+}
+
+// collectNames adds each usable name to the set. An unknown name is reported
+// by checkName and then left out: warning about a typo and acting on it
+// anyway is how one bad entry in `only:` becomes a whitelist matching nothing.
+func collectNames(names []string, into map[string]bool, checkName func(string) (bool, error)) error {
+	for _, name := range names {
+		ok, err := checkName(name)
+		if err != nil {
+			return err
+		}
+		if ok {
+			into[name] = true
+		}
+	}
+	return nil
+}
+
+// applySeverities resolves the `rules.severity` map onto the profile. A
+// severity of "off" disables the rule rather than setting one, which is what
+// makes `severity: {slow-query: off}` equivalent to listing it under
+// `disable`.
+func applySeverities(
+	sevs map[string]string,
+	p *analyzer.Profile,
+	checkName func(string) (bool, error),
+	warn func(string, ...any) error,
+) error {
+	for name, sevStr := range sevs {
+		ok, err := checkName(name)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			continue
+		}
+		sev, off, valid := parseSeverity(sevStr)
+		if !valid {
 			if err := warn("rule %q: invalid severity %q", name, sevStr); err != nil {
-				return p, err
+				return err
 			}
 			continue
 		}
@@ -223,13 +312,148 @@ func (c *Config) Profile() (analyzer.Profile, error) {
 		}
 		p.Severity[name] = sev
 	}
-	for name, kv := range c.Rules.Settings {
-		if err := checkName(name); err != nil {
-			return p, err
+	return nil
+}
+
+// settingKind is how a per-rule setting is read back, so a value that will not
+// survive the read can be reported here instead of silently becoming a
+// default. analyzer.Settings.Duration and .Int both fall back on a bad value,
+// which would otherwise turn a typo into a wrong threshold — or, for
+// n-plus-one, into detection that never switches on.
+type settingKind int
+
+const (
+	settingDuration settingKind = iota
+	settingInt
+	// settingPositiveInt and settingPositiveDuration additionally reject zero
+	// and negatives, for a tunable where a non-positive value is never what
+	// anyone means: it either silently switches the feature off, or — for a
+	// latency threshold — matches every query and floods the reporter.
+	settingPositiveInt
+	settingPositiveDuration
+)
+
+// ruleSettings is the complete set of tunables, by rule and key. It is
+// complete on purpose: a rule absent from this map reads no settings at all,
+// so any key given for it is a mistake, and a key absent from a listed rule is
+// a misspelling. Either way the value is silently ignored at read time, which
+// is the failure this validation exists to prevent. Adding a tunable to a rule
+// means adding it here.
+var ruleSettings = map[string]map[string]settingKind{
+	"slow-query":        {"threshold": settingPositiveDuration},
+	"n-plus-one":        {"threshold": settingPositiveInt, "window": settingPositiveDuration},
+	"leading-wildcard":  {"min-length": settingInt},
+	"in-list-too-large": {"max-length": settingInt},
+	"large-offset":      {"threshold": settingInt},
+}
+
+// pairedSettings names settings that only take effect together. n-plus-one
+// needs both to switch detection on, so half a block is silently inert.
+var pairedSettings = map[string][]string{
+	"n-plus-one": {"threshold", "window"},
+}
+
+// checkSettings reports a setting key the rule does not have, a value that
+// will not read back as its kind, and a half-specified pair. It returns the
+// settings that survived.
+//
+// Returning a subset is the point: in lenient mode a warning does not stop the
+// load, and carrying a rejected value through to the profile would mean the
+// reader still acts on it. `slow-query.threshold: 0` warned and then matched
+// every query anyway, flooding the reporter — the warning named the problem
+// while the problem still happened. A value this reports is a value the rules
+// must not see.
+func checkSettings(rule string, kv map[string]any, warn func(string, ...any) error) (analyzer.Settings, error) {
+	kinds, tunable := ruleSettings[rule]
+	kept := make(analyzer.Settings, len(kv))
+	for key, v := range kv {
+		kind, known := kinds[key]
+		if !known {
+			if !tunable {
+				if err := warn("rule %q has no settings, so %q is ignored", rule, key); err != nil {
+					return nil, err
+				}
+				continue
+			}
+			if err := warn("rule %q: unknown setting %q (known: %s)",
+				rule, key, strings.Join(sortedKeys(kinds), ", ")); err != nil {
+				return nil, err
+			}
+			continue
 		}
-		p.Settings[name] = analyzer.Settings(kv)
+		bad, err := checkSettingValue(rule, key, kind, v, warn)
+		if err != nil {
+			return nil, err
+		}
+		if !bad {
+			kept[key] = v
+		}
 	}
-	return p, nil
+
+	pair := pairedSettings[rule]
+	if len(pair) == 0 {
+		return kept, nil
+	}
+	// Judged on what survived: a pair whose other half was rejected is just as
+	// inert as one whose other half was never written.
+	var have, missing []string
+	for _, key := range pair {
+		if _, present := kept[key]; present {
+			have = append(have, key)
+		} else {
+			missing = append(missing, key)
+		}
+	}
+	if len(have) > 0 && len(missing) > 0 {
+		return kept, warn("rule %q: setting %q has no effect without %q",
+			rule, strings.Join(have, ", "), strings.Join(missing, ", "))
+	}
+	return kept, nil
+}
+
+// checkSettingValue reports a value the reader cannot use. bad is true when
+// the value was rejected, so the caller can keep it out of the profile.
+func checkSettingValue(rule, key string, kind settingKind, v any, warn func(string, ...any) error) (bad bool, err error) {
+	// Validate through the same accessors the rules read with, so a value
+	// accepted here can never be one the reader quietly replaces with its
+	// default. A second copy of these parsing rules is exactly how the two
+	// drift apart.
+	one := analyzer.Settings{key: v}
+
+	switch kind {
+	case settingDuration, settingPositiveDuration:
+		d, ok := one.LookupDuration(key)
+		if !ok {
+			// A bool, a list or a map reads back as the default, which for
+			// n-plus-one.window means detection silently never switches on.
+			return true, warn("rule %q: setting %q: expected a duration or a number, got %v", rule, key, v)
+		}
+		if kind == settingPositiveDuration && d <= 0 {
+			return true, warn("rule %q: setting %q must be greater than 0, got %v", rule, key, v)
+		}
+	case settingInt, settingPositiveInt:
+		n, ok := one.LookupInt(key)
+		if !ok {
+			// A quoted number is the common YAML slip. Settings.Int does not
+			// accept a string, so it would read back as the default: for
+			// n-plus-one.threshold that means detection never switches on.
+			return true, warn("rule %q: setting %q: expected a number, got %v (quoted numbers are strings in YAML)",
+				rule, key, v)
+		}
+		if kind == settingPositiveInt && n <= 0 {
+			return true, warn("rule %q: setting %q must be greater than 0, got %d", rule, key, n)
+		}
+	}
+	return false, nil
+}
+
+func sortedKeys(m map[string]settingKind) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // rawQuery reports whether Result.Query redaction is disabled. Redaction is
@@ -246,20 +470,6 @@ func (c *Config) Analyzer() (*analyzer.Analyzer, error) {
 		return nil, err
 	}
 	return analyzer.DefaultWithProfile(p), nil
-}
-
-// SlowQueryThreshold returns the configured slow-query threshold. ok is false
-// when unset, in which case the caller keeps its own default.
-func (c *Config) SlowQueryThreshold() (d time.Duration, ok bool, err error) {
-	s := strings.TrimSpace(c.SlowQuery.Threshold)
-	if s == "" {
-		return 0, false, nil
-	}
-	d, err = time.ParseDuration(s)
-	if err != nil {
-		return 0, false, fmt.Errorf("sqlguard config: slow-query.threshold %q: %w", s, err)
-	}
-	return d, true, nil
 }
 
 // DedupWindow returns the configured static-finding dedup window. ok is false

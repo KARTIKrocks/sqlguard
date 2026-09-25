@@ -5,8 +5,9 @@ import (
 )
 
 // MiddlewareOptions translates this config into middleware options: an
-// analyzer built from the rule Profile, and the slow-query threshold when
-// configured. Combine with other middleware options as needed, e.g.:
+// analyzer built from the rule Profile, which carries the rule settings
+// (including `slow-query.threshold` and the `n-plus-one` tunables), plus the
+// dedup window. Combine with other middleware options as needed, e.g.:
 //
 //	opts, _ := cfg.MiddlewareOptions()
 //	opts = append(opts, middleware.WithParser(pgparser.New()))
@@ -19,15 +20,11 @@ func (c *Config) MiddlewareOptions() ([]middleware.Option, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The slow-query threshold and the N+1 threshold/window travel inside the
+	// analyzer's profile as rule settings, so they need no option of their
+	// own here — NewGuard reads them unless a Go option names them
+	// explicitly.
 	opts := []middleware.Option{middleware.WithAnalyzer(a)}
-
-	d, ok, err := c.SlowQueryThreshold()
-	if err != nil {
-		return nil, err
-	}
-	if ok {
-		opts = append(opts, middleware.WithSlowQueryThreshold(d))
-	}
 
 	dw, ok, err := c.DedupWindow()
 	if err != nil {

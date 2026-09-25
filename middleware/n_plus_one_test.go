@@ -32,7 +32,7 @@ func TestNormalizeQuery(t *testing.T) {
 
 func TestQueryTracker_DetectsN1(t *testing.T) {
 	var reported []analyzer.Result
-	tracker := NewQueryTracker(3, 5*time.Second, func(results []analyzer.Result) {
+	tracker := NewQueryTracker(3, 5*time.Second, analyzer.SeverityWarning, func(results []analyzer.Result) {
 		reported = append(reported, results...)
 	})
 
@@ -51,7 +51,7 @@ func TestQueryTracker_DetectsN1(t *testing.T) {
 
 func TestQueryTracker_DifferentPatterns(t *testing.T) {
 	var reported []analyzer.Result
-	tracker := NewQueryTracker(3, 5*time.Second, func(results []analyzer.Result) {
+	tracker := NewQueryTracker(3, 5*time.Second, analyzer.SeverityWarning, func(results []analyzer.Result) {
 		reported = append(reported, results...)
 	})
 
@@ -67,7 +67,7 @@ func TestQueryTracker_DifferentPatterns(t *testing.T) {
 
 func TestQueryTracker_BelowThreshold(t *testing.T) {
 	var reported []analyzer.Result
-	tracker := NewQueryTracker(5, 5*time.Second, func(results []analyzer.Result) {
+	tracker := NewQueryTracker(5, 5*time.Second, analyzer.SeverityWarning, func(results []analyzer.Result) {
 		reported = append(reported, results...)
 	})
 
@@ -83,7 +83,7 @@ func TestQueryTracker_BelowThreshold(t *testing.T) {
 
 func TestQueryTracker_ReportsOnlyOnce(t *testing.T) {
 	var reported []analyzer.Result
-	tracker := NewQueryTracker(2, 5*time.Second, func(results []analyzer.Result) {
+	tracker := NewQueryTracker(2, 5*time.Second, analyzer.SeverityWarning, func(results []analyzer.Result) {
 		reported = append(reported, results...)
 	})
 
@@ -99,7 +99,7 @@ func TestQueryTracker_ReportsOnlyOnce(t *testing.T) {
 
 func TestQueryTracker_Reset(t *testing.T) {
 	var reported []analyzer.Result
-	tracker := NewQueryTracker(2, 5*time.Second, func(results []analyzer.Result) {
+	tracker := NewQueryTracker(2, 5*time.Second, analyzer.SeverityWarning, func(results []analyzer.Result) {
 		reported = append(reported, results...)
 	})
 

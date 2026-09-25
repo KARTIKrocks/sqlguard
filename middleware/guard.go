@@ -22,6 +22,32 @@ type Guard struct {
 	tracker *QueryTracker
 	deduper *deduper
 	cache   *analysisCache
+	// slowQuery is the profile's resolved decision for the `slow-query`
+	// rule. Resolved once here because Guard runs on every query.
+	slowQuery findingPolicy
+}
+
+// findingPolicy is a registered rule's resolved state for a finding the
+// analyzer does not evaluate itself.
+//
+// `enabled` answers `disable:` and `severity: off` only — `only:` selects the
+// rules evaluated against a statement, and these are not among them (see
+// analyzer.RuleEnabled). `severity` folds in a profile override. Settings
+// reach these rules too, through Profile.Settings.
+type findingPolicy struct {
+	enabled  bool
+	severity analyzer.Severity
+}
+
+// resolvePolicy reads the default severity from the registry rather than
+// repeating a literal here, so `Register(RuleSpec{Name: "slow-query", …})` is
+// what decides it — the same as for an evaluated rule.
+func resolvePolicy(a *analyzer.Analyzer, name string) findingPolicy {
+	def := analyzer.RuleDefaultSeverityOr(name, analyzer.SeverityWarning)
+	return findingPolicy{
+		enabled:  a.RuleEnabled(name),
+		severity: a.RuleSeverity(name, def),
+	}
 }
 
 // NewGuard builds a Guard from the given options.
@@ -33,12 +59,31 @@ func NewGuard(opts ...Option) *Guard {
 	if o.parser != nil {
 		o.analyzer = o.analyzer.WithParser(o.parser)
 	}
+	// Profile settings feed the thresholds unless a Go option named one
+	// explicitly, so `rules.settings` works the same for these findings as
+	// for any statement rule.
+	if !o.slowThresholdSet {
+		o.slowThreshold = o.analyzer.RuleSettings("slow-query").
+			Duration("threshold", o.slowThreshold)
+	}
+	if !o.n1Set {
+		if s := o.analyzer.RuleSettings("n-plus-one"); s != nil {
+			threshold := s.Int("threshold", 0)
+			window := s.Duration("window", 0)
+			if threshold > 0 && window > 0 {
+				o.enableN1, o.n1Threshold, o.n1Window = true, threshold, window
+			}
+		}
+	}
+
 	g := &Guard{opts: o, deduper: newDeduper(o.dedupWindow)}
+	g.slowQuery = resolvePolicy(o.analyzer, "slow-query")
 	if o.cacheSize > 0 {
 		g.cache = newAnalysisCache(o.cacheSize)
 	}
-	if o.enableN1 {
-		g.tracker = NewQueryTracker(o.n1Threshold, o.n1Window, func(results []analyzer.Result) {
+	n1 := resolvePolicy(o.analyzer, "n-plus-one")
+	if o.enableN1 && n1.enabled {
+		g.tracker = NewQueryTracker(o.n1Threshold, o.n1Window, n1.severity, func(results []analyzer.Result) {
 			o.reporter.Report(results)
 		})
 	}
@@ -96,12 +141,13 @@ func (g *Guard) report(results []analyzer.Result) {
 }
 
 // CheckLatency reports a slow-query finding if elapsed exceeds the threshold.
+// Does nothing when the profile disabled `slow-query`.
 func (g *Guard) CheckLatency(query string, elapsed time.Duration) {
-	if elapsed >= g.opts.slowThreshold {
+	if g.slowQuery.enabled && elapsed >= g.opts.slowThreshold {
 		display, fingerprint := g.opts.analyzer.PrepareQuery(query)
 		g.opts.reporter.Report([]analyzer.Result{{
 			RuleName:    "slow-query",
-			Severity:    analyzer.SeverityWarning,
+			Severity:    g.slowQuery.severity,
 			Query:       display,
 			Fingerprint: fingerprint,
 			Message:     fmt.Sprintf("Query took %s (threshold: %s)", elapsed.Round(time.Millisecond), g.opts.slowThreshold),

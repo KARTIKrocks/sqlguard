@@ -9,24 +9,31 @@ import (
 
 type options struct {
 	slowThreshold time.Duration
-	reporter      reporter.Reporter
-	analyzer      *analyzer.Analyzer
-	parser        analyzer.Parser
-	n1Threshold   int
-	n1Window      time.Duration
-	enableN1      bool
-	dedupWindow   time.Duration
-	cacheSize     int
+	// slowThresholdSet and n1Set record that a Go option named these
+	// explicitly, so NewGuard knows not to let profile settings override it.
+	slowThresholdSet bool
+	n1Set            bool
+	reporter         reporter.Reporter
+	analyzer         *analyzer.Analyzer
+	parser           analyzer.Parser
+	n1Threshold      int
+	n1Window         time.Duration
+	enableN1         bool
+	dedupWindow      time.Duration
+	cacheSize        int
 }
 
 // Option configures the runtime guard.
 type Option func(*options)
 
-// WithSlowQueryThreshold sets the duration above which a query is flagged as slow.
-// Default is 200ms.
+// WithSlowQueryThreshold sets the duration above which a query is flagged as
+// slow. Default is 200ms. This takes precedence over a `slow-query.threshold`
+// setting carried by the analyzer's profile: an explicit Go option outranks
+// file configuration.
 func WithSlowQueryThreshold(d time.Duration) Option {
 	return func(o *options) {
 		o.slowThreshold = d
+		o.slowThresholdSet = true
 	}
 }
 
@@ -58,6 +65,7 @@ func WithParser(p analyzer.Parser) Option {
 func WithN1Detection(threshold int, window time.Duration) Option {
 	return func(o *options) {
 		o.enableN1 = true
+		o.n1Set = true
 		o.n1Threshold = threshold
 		o.n1Window = window
 	}

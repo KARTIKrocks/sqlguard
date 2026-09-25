@@ -20,6 +20,11 @@ type PlanAnalyzer struct {
 	db       *sql.DB
 	dialect  string // "postgres" or "mysql"
 	allowDML bool
+	// rules carries the resolved rule profile. The plan rules are registered
+	// in the analyzer purely to be addressable, so `disable`, `only` and
+	// `severity` reach them exactly as they reach a statement rule. Nil means
+	// no configuration: every plan rule fires at its built-in severity.
+	rules *analyzer.Analyzer
 }
 
 // Option configures a PlanAnalyzer.
@@ -33,6 +38,17 @@ type Option func(*PlanAnalyzer)
 // so nothing is committed regardless.
 func WithAllowDML() Option {
 	return func(p *PlanAnalyzer) { p.allowDML = true }
+}
+
+// WithAnalyzer supplies the configured analyzer whose rule profile governs
+// which plan findings are reported and at what severity. The CLI passes the
+// one built from .sqlguard.yml; a library caller can pass
+// analyzer.DefaultWithProfile(p).
+//
+// `explain` does not run the statement rules — it only borrows the profile
+// decisions, so the same `disable: [seq-scan]` works on every surface.
+func WithAnalyzer(a *analyzer.Analyzer) Option {
+	return func(p *PlanAnalyzer) { p.rules = a }
 }
 
 // New creates a PlanAnalyzer for the given database connection.
@@ -79,12 +95,45 @@ func (p *PlanAnalyzer) Analyze(ctx context.Context, query string) (*Result, erro
 		return nil, fmt.Errorf("explain: unsupported dialect %q", p.dialect)
 	}
 	if res != nil {
+		res.Issues = p.applyProfile(res.Issues)
 		fp := analyzer.Fingerprint(query)
 		for i := range res.Issues {
 			res.Issues[i].Fingerprint = fp
 		}
 	}
 	return res, err
+}
+
+// planSeverity is the severity a plan rule was registered with. Reading it
+// keeps the registry entry meaningful for these rules too — they have no
+// Factory, so nothing else would ever consult their DefaultSeverity, and a
+// literal here would silently outrank it.
+func planSeverity(name string) analyzer.Severity {
+	return analyzer.RuleDefaultSeverityOr(name, analyzer.SeverityWarning)
+}
+
+// applyProfile drops findings the profile disabled and applies any severity
+// override. It runs once over the collected issues rather than at each site
+// that builds one, so a plan rule added later cannot forget the check.
+//
+// Only a rule named in `disable:` (or given `severity: off`) is dropped —
+// see Analyzer.RuleEnabled for why an `only:` whitelist does not reach here.
+//
+// A severity override wins over a computed severity: `seq-scan` picks INFO or
+// WARNING from the estimated row count, and an explicit setting outranks both.
+func (p *PlanAnalyzer) applyProfile(issues []analyzer.Result) []analyzer.Result {
+	if p.rules == nil || len(issues) == 0 {
+		return issues
+	}
+	kept := issues[:0]
+	for _, r := range issues {
+		if !p.rules.RuleEnabled(r.RuleName) {
+			continue
+		}
+		r.Severity = p.rules.RuleSeverity(r.RuleName, r.Severity)
+		kept = append(kept, r)
+	}
+	return kept
 }
 
 // validate enforces the EXPLAIN safety policy and returns the single,
@@ -194,9 +243,13 @@ func (p *PlanAnalyzer) walkPgPlan(node *pgPlanNode, query string, issues *[]anal
 
 	// Detect sequential scans
 	if node.NodeType == "Seq Scan" {
-		severity := analyzer.SeverityInfo
+		// A wide scan escalates, but only upward: Register can replace a
+		// built-in by name, so assigning the literal outright would let a
+		// seq-scan registered at CRITICAL report the >1000-row case as the
+		// *less* severe of the two.
+		severity := planSeverity("seq-scan")
 		if node.PlanRows > 1000 {
-			severity = analyzer.SeverityWarning
+			severity = max(severity, analyzer.SeverityWarning)
 		}
 		*issues = append(*issues, analyzer.Result{
 			RuleName:   "seq-scan",
@@ -211,7 +264,7 @@ func (p *PlanAnalyzer) walkPgPlan(node *pgPlanNode, query string, issues *[]anal
 	if node.TotalCost > 10000 {
 		*issues = append(*issues, analyzer.Result{
 			RuleName:   "high-cost",
-			Severity:   analyzer.SeverityWarning,
+			Severity:   planSeverity("high-cost"),
 			Query:      query,
 			Message:    fmt.Sprintf("High cost operation: %s (cost %.1f)", node.NodeType, node.TotalCost),
 			Suggestion: "Review query plan and consider optimization.",
@@ -320,7 +373,7 @@ func mysqlRowIssues(query string, col func(string) string) []analyzer.Result {
 		planRows, _ := strconv.ParseInt(col("rows"), 10, 64)
 		issues = append(issues, analyzer.Result{
 			RuleName:   "full-table-scan",
-			Severity:   analyzer.SeverityWarning,
+			Severity:   planSeverity("full-table-scan"),
 			Query:      query,
 			Message:    fmt.Sprintf("Full table scan on %s (estimated %d rows)", table, planRows),
 			Suggestion: "Consider adding an index to avoid full table scan.",
@@ -331,7 +384,7 @@ func mysqlRowIssues(query string, col func(string) string) []analyzer.Result {
 	if col("key") == "" && col("possible_keys") == "" {
 		issues = append(issues, analyzer.Result{
 			RuleName:   "no-index-used",
-			Severity:   analyzer.SeverityWarning,
+			Severity:   planSeverity("no-index-used"),
 			Query:      query,
 			Message:    "No index used on table " + table,
 			Suggestion: "Consider adding an index on the filtered/joined columns.",
@@ -342,7 +395,7 @@ func mysqlRowIssues(query string, col func(string) string) []analyzer.Result {
 	if strings.Contains(col("extra"), "Using filesort") {
 		issues = append(issues, analyzer.Result{
 			RuleName:   "filesort",
-			Severity:   analyzer.SeverityInfo,
+			Severity:   planSeverity("filesort"),
 			Query:      query,
 			Message:    "Filesort detected on table " + table,
 			Suggestion: "Consider adding an index that covers the ORDER BY columns.",

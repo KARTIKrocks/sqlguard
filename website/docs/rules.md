@@ -39,6 +39,24 @@ can be overridden per project.
 | `no-index-used` | WARNING | EXPLAIN (mysql) | Empty `key` **and** empty `possible_keys` |
 | `filesort` | INFO | EXPLAIN (mysql) | `Using filesort` in `Extra` |
 
+_Changed in 0.3._ Every rule in this table is addressable by name in
+[`.sqlguard.yml`](configuration): `disable` and `severity` work the same for a
+runtime or plan rule as for a statement rule. In 0.2 only the 14 statement
+rules were — naming any of the other seven warned with `unknown rule`, and
+failed under `strict: true`.
+
+Two qualifications. `only:` is a whitelist over the rules evaluated against a
+statement, so it reaches neither the runtime findings nor the plan rules —
+see [what `only:` reaches](configuration#what-only-reaches). And `settings` only
+exists where a rule has a tunable: `leading-wildcard`, `in-list-too-large`,
+`large-offset`, `slow-query` and `n-plus-one` have them; the five plan rules
+have none and their thresholds are fixed, so a `settings` block for one is
+reported as having no effect.
+
+The runtime and plan rules are not evaluated against parsed SQL — middleware
+derives them from latency and fingerprint counts, and `explain` from the
+database's own plan — so they never fire during a static `sqlguard scan`.
+
 "static, runtime" rules read the normalized `Statement` a [parser](parsers)
 produces; they never look at raw SQL. The runtime and EXPLAIN rules are
 built into the [middleware](middleware) and the [EXPLAIN analyzer](explain)
@@ -182,8 +200,11 @@ legitimate query.
 ### `n-plus-one`
 
 Emitted by the middleware when the same query fingerprint executes
-`threshold` times inside `window`. Off unless `WithN1Detection` is set.
-Full description in [N+1 detection](n-plus-one).
+`threshold` times inside `window`. Off unless it is switched on — with
+`WithN1Detection` in Go, or by setting both
+`rules.settings.n-plus-one.threshold` and `.window` in
+[config](configuration) _0.3+_. Full description in
+[N+1 detection](n-plus-one).
 
 > **Fix:** Consider using a `JOIN` or `IN` clause to batch these queries.
 
@@ -191,7 +212,8 @@ Full description in [N+1 detection](n-plus-one).
 
 Emitted when a successful query's latency, measured at the driver, reaches
 the threshold (`WithSlowQueryThreshold`, default 200 ms; or
-`slow-query.threshold` in config). The message includes the measured time
+`rules.settings.slow-query.threshold` in config — _changed in 0.3_, this was
+a top-level `slow-query.threshold` key). The message includes the measured time
 and the threshold. Reported on every slow execution — it is not
 [de-duplicated](noise-control).
 
@@ -199,8 +221,10 @@ and the threshold. Reported on every slow execution — it is not
 
 ## EXPLAIN rules
 
-Produced by [`sqlguard explain`](explain) from the query plan. They are not
-configurable through `rules:` in `.sqlguard.yml`.
+Produced by [`sqlguard explain`](explain) from the query plan. _Changed in
+0.3._ These are configurable through `rules:` in `.sqlguard.yml` like any
+other rule; in 0.2 they were not, and naming one was an `unknown rule`
+warning.
 
 ### `seq-scan` (PostgreSQL)
 

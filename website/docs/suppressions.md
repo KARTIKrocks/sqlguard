@@ -64,7 +64,9 @@ quiet at runtime too needs the in-SQL form.
 
 ## What suppression does not do
 
-- It does not affect the `slow-query` or `n-plus-one` runtime findings.
+- It does not affect the `slow-query` or `n-plus-one` runtime findings. Those
+  are turned off in [config](configuration) instead — `disable: [slow-query]`
+  — which since 0.3 works for every rule name in the reference table.
   Those are about behaviour, not statement text; tune their thresholds via
   [options](middleware#options) or scope N+1 with `ResetN1()`.
 - It does not affect the [EXPLAIN analyzer](explain), which reports on the

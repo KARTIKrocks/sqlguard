@@ -267,3 +267,27 @@ func CheckOrderByWithoutLimit(s *Statement) (Result, bool) {
 	}
 	return Result{}, false
 }
+
+// Findings produced outside the statement path register here too, with no
+// Factory. `slow-query` and `n-plus-one` are built by middleware from latency
+// and fingerprint counts; the five plan rules are derived by `explain` from a
+// database's own EXPLAIN output. None of them can be evaluated against a
+// parsed Statement, but every one of them is documented as a rule and is
+// expected to answer to `disable`, `only`, `severity` and `settings` the same
+// way the statement rules do.
+//
+// They are registered here rather than in middleware/ and explain/ so that
+// RuleNames() is complete for whoever asks. The config loader validates
+// against it while importing only analyzer, so registering `seq-scan` from
+// explain's init would make a config naming it fail for anyone who does not
+// link that package.
+func init() {
+	Register(RuleSpec{Name: "slow-query", DefaultSeverity: SeverityWarning})
+	Register(RuleSpec{Name: "n-plus-one", DefaultSeverity: SeverityWarning})
+
+	Register(RuleSpec{Name: "seq-scan", DefaultSeverity: SeverityInfo})
+	Register(RuleSpec{Name: "high-cost", DefaultSeverity: SeverityWarning})
+	Register(RuleSpec{Name: "full-table-scan", DefaultSeverity: SeverityWarning})
+	Register(RuleSpec{Name: "no-index-used", DefaultSeverity: SeverityWarning})
+	Register(RuleSpec{Name: "filesort", DefaultSeverity: SeverityInfo})
+}

@@ -31,17 +31,21 @@ type QueryTracker struct {
 	threshold int
 	window    time.Duration
 	maxKeys   int
+	severity  analyzer.Severity
 	reporter  func(results []analyzer.Result)
 }
 
 // NewQueryTracker creates a tracker that flags when the same query pattern
-// appears more than threshold times within the given window.
-func NewQueryTracker(threshold int, window time.Duration, reportFn func([]analyzer.Result)) *QueryTracker {
+// appears more than threshold times within the given window. severity is the
+// one to report, which Guard resolves from the profile so a `severity:`
+// override on `n-plus-one` reaches the finding.
+func NewQueryTracker(threshold int, window time.Duration, severity analyzer.Severity, reportFn func([]analyzer.Result)) *QueryTracker {
 	return &QueryTracker{
 		queries:   make(map[string]*queryRecord),
 		threshold: threshold,
 		window:    window,
 		maxKeys:   10000,
+		severity:  severity,
 		reporter:  reportFn,
 	}
 }
@@ -98,7 +102,7 @@ func (qt *QueryTracker) Track(query string) {
 	if shouldReport {
 		qt.reporter([]analyzer.Result{{
 			RuleName:    "n-plus-one",
-			Severity:    analyzer.SeverityWarning,
+			Severity:    qt.severity,
 			Query:       normalized,
 			Fingerprint: normalized,
 			Message:     fmt.Sprintf("Possible N+1 query detected: same pattern executed %d times in %s", count, qt.window),

@@ -2,6 +2,7 @@ package analyzer
 
 import (
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -12,22 +13,33 @@ import (
 // can always be constructed even with no settings supplied.
 type Settings map[string]any
 
-// Int returns the setting as an int, or def if missing or not numeric.
-// YAML decodes integers as int and JSON as float64, so both are accepted.
-func (s Settings) Int(key string, def int) int {
+// LookupInt returns the setting as an int. ok is false when the key is absent
+// or the value is one Int cannot use — the same condition under which Int
+// falls back to its default. The config loader validates through this so it
+// flags exactly what the reader will ignore, instead of keeping a second copy
+// of these rules that can drift.
+func (s Settings) LookupInt(key string) (int, bool) {
 	if s == nil {
-		return def
+		return 0, false
 	}
 	switch v := s[key].(type) {
 	case int:
-		return v
+		return v, true
 	case int64:
-		return int(v)
+		return int(v), true
 	case float64:
-		return int(v)
-	default:
-		return def
+		return int(v), true
 	}
+	return 0, false
+}
+
+// Int returns the setting as an int, or def if missing or not numeric.
+// YAML decodes integers as int and JSON as float64, so both are accepted.
+func (s Settings) Int(key string, def int) int {
+	if v, ok := s.LookupInt(key); ok {
+		return v
+	}
+	return def
 }
 
 // Bool returns the setting as a bool, or def if missing or not a bool.
@@ -52,24 +64,37 @@ func (s Settings) String(key, def string) string {
 	return def
 }
 
-// Duration returns the setting parsed as a time.Duration. It accepts a
-// duration string ("200ms") or a number interpreted as milliseconds. Returns
-// def if missing or unparseable.
-func (s Settings) Duration(key string, def time.Duration) time.Duration {
+// LookupDuration returns the setting parsed as a time.Duration. It accepts a
+// duration string ("200ms") or a number interpreted as milliseconds. ok is
+// false when the key is absent or the value is one Duration cannot use — see
+// LookupInt for why the config loader validates through this.
+func (s Settings) LookupDuration(key string) (time.Duration, bool) {
 	if s == nil {
-		return def
+		return 0, false
 	}
 	switch v := s[key].(type) {
 	case string:
-		if d, err := time.ParseDuration(v); err == nil {
-			return d
-		}
+		// Trimmed so this agrees with the config loader's validation; a
+		// value it accepts must not fall back to def here.
+		d, err := time.ParseDuration(strings.TrimSpace(v))
+		return d, err == nil
 	case int:
-		return time.Duration(v) * time.Millisecond
+		return time.Duration(v) * time.Millisecond, true
 	case int64:
-		return time.Duration(v) * time.Millisecond
+		return time.Duration(v) * time.Millisecond, true
 	case float64:
-		return time.Duration(v) * time.Millisecond
+		// Scale before converting: time.Duration(0.5) truncates to 0, which
+		// turned a fractional-millisecond threshold into "no threshold".
+		return time.Duration(v * float64(time.Millisecond)), true
+	}
+	return 0, false
+}
+
+// Duration returns the setting parsed as a time.Duration, or def if missing
+// or unparseable.
+func (s Settings) Duration(key string, def time.Duration) time.Duration {
+	if d, ok := s.LookupDuration(key); ok {
+		return d
 	}
 	return def
 }
@@ -81,8 +106,17 @@ func (s Settings) Duration(key string, def time.Duration) time.Duration {
 type RuleSpec struct {
 	Name            string
 	DefaultSeverity Severity
-	Factory         func(Settings) Rule
+	// Factory builds the rule for the statement path. It is nil for findings
+	// the Analyzer does not produce itself — middleware's `slow-query` and
+	// `n-plus-one`, and the plan rules `explain` derives from a query plan.
+	// Those register so they are addressable by name like any other rule;
+	// their owners ask the Analyzer for the resolved decision before they
+	// emit. A nil Factory is never called.
+	Factory func(Settings) Rule
 }
+
+// Evaluated reports whether the Analyzer builds and runs this rule itself.
+func (s RuleSpec) Evaluated() bool { return s.Factory != nil }
 
 var (
 	registryMu sync.RWMutex
@@ -109,6 +143,48 @@ func RuleNames() []string {
 	registryMu.RUnlock()
 	sort.Strings(names)
 	return names
+}
+
+// EvaluatedRuleNames returns the rules the Analyzer runs against a Statement,
+// sorted — the subset of RuleNames() that has a Factory. The config loader
+// uses it to tell an `only:` list that selects nothing runnable from one that
+// narrows the scan, which reads identically in YAML.
+func EvaluatedRuleNames() []string {
+	registryMu.RLock()
+	names := make([]string, 0, len(registry))
+	for n, spec := range registry {
+		if spec.Evaluated() {
+			names = append(names, n)
+		}
+	}
+	registryMu.RUnlock()
+	sort.Strings(names)
+	return names
+}
+
+// RuleDefaultSeverity returns the severity a rule was registered with. ok is
+// false for an unregistered name. The findings built outside the statement
+// path read this rather than repeating a literal, so the registry entry stays
+// the single source of truth for every rule, not just the evaluated ones.
+func RuleDefaultSeverity(name string) (sev Severity, ok bool) {
+	registryMu.RLock()
+	defer registryMu.RUnlock()
+	spec, found := registry[name]
+	if !found {
+		return 0, false
+	}
+	return spec.DefaultSeverity, true
+}
+
+// RuleDefaultSeverityOr returns the severity a rule was registered with, or def
+// when the name is not registered. It is what the findings built outside the
+// statement path use: they cannot reach their RuleSpec any other way, and
+// without one helper each of them repeats the same lookup-and-fall-back.
+func RuleDefaultSeverityOr(name string, def Severity) Severity {
+	if sev, ok := RuleDefaultSeverity(name); ok {
+		return sev
+	}
+	return def
 }
 
 // specs returns all registered specs sorted by name, for deterministic
@@ -143,7 +219,11 @@ type Profile struct {
 	RawQuery bool
 }
 
-func (p Profile) skip(name string) bool {
+// Skip reports whether this profile excludes the named rule from evaluation,
+// folding in both the `only` whitelist and the disabled set. It is exported so
+// the config loader can ask the same question the Analyzer answers, rather
+// than reimplementing the precedence and drifting from it.
+func (p Profile) Skip(name string) bool {
 	if len(p.Only) > 0 && !p.Only[name] {
 		return true
 	}
