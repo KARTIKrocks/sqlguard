@@ -56,6 +56,11 @@ the same version in lockstep.
 - An `only:` list that names no rule the scanner runs — `only: [slow-query]`,
   now that it is a valid name — is reported. It would otherwise leave
   `sqlguard scan` finding nothing on any codebase, which reads as a clean run.
+- A non-positive `slow-query.threshold` or `n-plus-one.window` is reported. A
+  threshold of `0` matches every successful query, so it would have flooded
+  the reporter with `slow-query` on every statement; a zero window leaves N+1
+  off. A fractional-millisecond threshold such as `0.5` also truncated to zero
+  when read, which produced the same flood — it now scales before converting.
 - A misspelled setting **key** is reported too, not just a bad value: the rule
   name is known and the value well-formed, so the setting is simply absent and
   the built-in default stands. A `settings` block on a rule with no tunables

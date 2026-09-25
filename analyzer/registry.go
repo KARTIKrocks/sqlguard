@@ -72,7 +72,9 @@ func (s Settings) Duration(key string, def time.Duration) time.Duration {
 	case int64:
 		return time.Duration(v) * time.Millisecond
 	case float64:
-		return time.Duration(v) * time.Millisecond
+		// Scale before converting: time.Duration(0.5) truncates to 0, which
+		// turned a fractional-millisecond threshold into "no threshold".
+		return time.Duration(v * float64(time.Millisecond))
 	}
 	return def
 }

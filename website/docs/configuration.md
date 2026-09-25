@@ -138,9 +138,19 @@ And on a `*Config`:
 | `MiddlewareOptions() ([]middleware.Option, error)` | `WithAnalyzer` from the profile — which carries the rule settings, including the slow-query and N+1 tunables — plus `WithFindingDedup` when set. Append your own options after it. |
 | `Analyzer() (*analyzer.Analyzer, error)` | `analyzer.DefaultWithProfile` built from this file. |
 | `Profile() (analyzer.Profile, error)` | The resolved, parser-independent profile. |
-| `DedupWindow()` | `(time.Duration, ok bool, error)` — `ok` is false when the key is unset. _Changed in 0.3._ `SlowQueryThreshold()` is gone; read `Profile().Settings["slow-query"].Duration("threshold", d)` instead. |
+| `DedupWindow()` | `(time.Duration, ok bool, error)` — `ok` is false when the key is unset. _Changed in 0.3._ `SlowQueryThreshold()` is gone; take the profile first and read the setting off it (see below). |
 | `ExcludeMatcher() (func(path string) bool, error)` | The compiled `scan.exclude-paths` predicate. |
 | `Warnings() []string` | Non-fatal problems found while loading. Surface them. |
+
+The slow-query threshold now lives in the profile with every other tunable:
+
+```go
+p, err := cfg.Profile()
+if err != nil {
+    return err
+}
+d := p.Settings["slow-query"].Duration("threshold", 200*time.Millisecond)
+```
 
 The common case is one line:
 

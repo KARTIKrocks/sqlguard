@@ -249,8 +249,12 @@ func (p *PlanAnalyzer) walkPgPlan(node *pgPlanNode, query string, issues *[]anal
 
 	// Detect sequential scans
 	if node.NodeType == "Seq Scan" {
+		// A wide scan escalates, but only upward: Register can replace a
+		// built-in by name, so assigning the literal outright would let a
+		// seq-scan registered at CRITICAL report the >1000-row case as the
+		// *less* severe of the two.
 		severity := planSeverity("seq-scan")
-		if node.PlanRows > 1000 {
+		if node.PlanRows > 1000 && severity < analyzer.SeverityWarning {
 			severity = analyzer.SeverityWarning
 		}
 		*issues = append(*issues, analyzer.Result{

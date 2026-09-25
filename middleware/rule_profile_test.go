@@ -210,3 +210,21 @@ func TestDisableBeatsExplicitGoOption(t *testing.T) {
 		}
 	})
 }
+
+// A sub-millisecond threshold must behave as written, not as zero.
+func TestSlowQuery_FractionalThreshold(t *testing.T) {
+	rep := &countingReporter{}
+	g := profileGuard(t, analyzer.Profile{
+		Settings: map[string]analyzer.Settings{"slow-query": {"threshold": 0.5}},
+	}, rep)
+
+	g.CheckLatency("SELECT 1", 100*time.Microsecond) // under 500µs
+	if got := rep.snapshot(); len(got) != 0 {
+		t.Fatalf("100µs is under a 500µs threshold; a 0 threshold would flag it: %+v", got)
+	}
+
+	g.CheckLatency("SELECT 1", 900*time.Microsecond) // over 500µs
+	if got := rep.snapshot(); len(got) != 1 {
+		t.Errorf("900µs should exceed a 500µs threshold, got %+v", got)
+	}
+}

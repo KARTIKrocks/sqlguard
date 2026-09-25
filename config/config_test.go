@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -304,8 +305,12 @@ func TestProfile_UnknownNameIsIgnoredNotHonoured(t *testing.T) {
 	if err != nil {
 		t.Fatalf("lenient mode should not fail: %v", err)
 	}
-	if len(c.Warnings()) != 1 {
-		t.Errorf("expected one warning, got %v", c.Warnings())
+	// Two warnings: the name itself, and what dropping it did to the list.
+	if len(c.Warnings()) != 2 {
+		t.Errorf("expected the unknown-name warning and the consequence, got %v", c.Warnings())
+	}
+	if !strings.Contains(strings.Join(c.Warnings(), " "), "unknown rule") {
+		t.Errorf("the unknown name was not reported: %v", c.Warnings())
 	}
 	if len(p.Only) != 0 {
 		t.Errorf("an unknown name entered the whitelist: %v", p.Only)
@@ -416,4 +421,100 @@ func TestProfile_ValidatesSettingKeys(t *testing.T) {
 			t.Errorf("documented settings rejected: %v", err)
 		}
 	})
+}
+
+// TestProfile_RejectsNonPositiveDurations covers the worst shape on the
+// branch. A slow-query threshold of 0 — or 0.5, which truncated to 0 before
+// Settings.Duration was fixed to scale first — matches every successful query,
+// so the middleware reports `slow-query` on all of them and floods the log
+// sink it exists to protect.
+func TestProfile_RejectsNonPositiveDurations(t *testing.T) {
+	cases := []struct {
+		name  string
+		rule  string
+		key   string
+		value any
+	}{
+		{"zero threshold flags every query", "slow-query", "threshold", 0},
+		{"zero duration string", "slow-query", "threshold", "0s"},
+		{"negative", "slow-query", "threshold", "-1s"},
+		{"zero window leaves N+1 off", "n-plus-one", "window", "0s"},
+		{"negative window", "n-plus-one", "window", "-1m"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			settings := map[string]map[string]any{tc.rule: {tc.key: tc.value}}
+			if tc.rule == "n-plus-one" {
+				settings[tc.rule]["threshold"] = 5
+			}
+
+			c := &Config{Rules: RulesConfig{Settings: settings}}
+			if _, err := c.Profile(); err != nil {
+				t.Fatalf("lenient mode should not fail: %v", err)
+			}
+			if len(c.Warnings()) == 0 {
+				t.Fatal("expected a warning")
+			}
+			if !strings.Contains(c.Warnings()[0], "greater than 0") {
+				t.Errorf("unexpected warning: %v", c.Warnings()[0])
+			}
+
+			strict := &Config{Strict: true, Rules: RulesConfig{Settings: settings}}
+			if _, err := strict.Profile(); err == nil {
+				t.Error("expected strict mode to reject it")
+			}
+		})
+	}
+
+	// A sub-millisecond threshold is legitimate. It used to truncate to zero
+	// — time.Duration(0.5) is 0 — which turned a tight threshold into one
+	// that matched every query, the opposite of what was asked for.
+	for _, tc := range []struct {
+		value any
+		want  time.Duration
+	}{
+		{1.5, 1500 * time.Microsecond},
+		{0.5, 500 * time.Microsecond},
+		{0.0004, 400 * time.Nanosecond},
+	} {
+		t.Run(fmt.Sprintf("fractional %v round trips", tc.value), func(t *testing.T) {
+			c := &Config{Strict: true, Rules: RulesConfig{Settings: map[string]map[string]any{
+				"slow-query": {"threshold": tc.value},
+			}}}
+			p, err := c.Profile()
+			if err != nil {
+				t.Fatalf("%v ms should be accepted: %v", tc.value, err)
+			}
+			if d := p.Settings["slow-query"].Duration("threshold", 0); d != tc.want {
+				t.Errorf("read back %v, want %v — the float conversion truncated", d, tc.want)
+			}
+		})
+	}
+}
+
+// TestProfile_OnlyResolvingToNothingWarns covers the inverse of the
+// selects-nothing case: when every name is unknown the whitelist resolves to
+// empty, and an empty whitelist is not a whitelist — every rule runs, which is
+// the opposite of what the user asked for.
+func TestProfile_OnlyResolvingToNothingWarns(t *testing.T) {
+	c := &Config{Rules: RulesConfig{Only: []string{"selct-star"}}}
+
+	p, err := c.Profile()
+	if err != nil {
+		t.Fatalf("lenient mode should not fail: %v", err)
+	}
+	if len(p.Only) != 0 {
+		t.Fatalf("expected an empty whitelist, got %v", p.Only)
+	}
+
+	var found bool
+	for _, w := range c.Warnings() {
+		if strings.Contains(w, "selects nothing and every rule runs") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("the consequence was not reported: %v", c.Warnings())
+	}
 }

@@ -108,3 +108,34 @@ func TestApplyProfile_SeverityOffDisables(t *testing.T) {
 		}
 	}
 }
+
+// TestPlanSeverity_EscalationOnlyGoesUp guards against inverting the registry
+// default. analyzer.Register can replace a built-in by name, so if seq-scan
+// were registered above WARNING, assigning the literal outright would report
+// the wide scan as *less* severe than the narrow one.
+func TestPlanSeverity_EscalationOnlyGoesUp(t *testing.T) {
+	// Restore the built-in registration however this test exits.
+	orig, ok := analyzer.RuleDefaultSeverity("seq-scan")
+	if !ok {
+		t.Fatal("seq-scan is not registered")
+	}
+	t.Cleanup(func() {
+		analyzer.Register(analyzer.RuleSpec{Name: "seq-scan", DefaultSeverity: orig})
+	})
+
+	analyzer.Register(analyzer.RuleSpec{Name: "seq-scan", DefaultSeverity: analyzer.SeverityCritical})
+
+	base := planSeverity("seq-scan")
+	if base != analyzer.SeverityCritical {
+		t.Fatalf("planSeverity did not pick up the re-registration: %v", base)
+	}
+
+	// The escalation branch must not lower it.
+	wide := base
+	if wide < analyzer.SeverityWarning {
+		wide = analyzer.SeverityWarning
+	}
+	if wide < base {
+		t.Errorf("a wide scan reported %v, below the registered %v", wide, base)
+	}
+}

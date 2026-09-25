@@ -201,7 +201,7 @@ func (c *Config) Profile() (analyzer.Profile, error) {
 	if err := collectNames(c.Rules.Only, p.Only, checkName); err != nil {
 		return p, err
 	}
-	if err := checkOnlySelectsSomething(p.Only, warn); err != nil {
+	if err := checkOnlySelectsSomething(c.Rules.Only, p.Only, warn); err != nil {
 		return p, err
 	}
 	if err := applySeverities(c.Rules.Severity, &p, checkName, warn); err != nil {
@@ -223,18 +223,29 @@ func (c *Config) Profile() (analyzer.Profile, error) {
 	return p, nil
 }
 
-// checkOnlySelectsSomething reports an `only:` list that leaves no rule for
-// the analyzer to run. Since every documented rule became addressable, a list
-// naming only runtime or plan rules — `only: [slow-query]` — is accepted and
-// then turns `sqlguard scan` into a command that reports nothing on any
-// codebase, which looks exactly like a clean scan. Before, those names were
-// rejected outright as unknown, so the shape could not arise.
-func checkOnlySelectsSomething(only map[string]bool, warn func(string, ...any) error) error {
-	if len(only) == 0 {
+// checkOnlySelectsSomething reports an `only:` list that does not narrow the
+// scan to anything. Two shapes reach here, and they fail in opposite
+// directions, so it takes the list as written (`configured`) as well as the
+// resolved set.
+//
+// A list naming only runtime or plan rules — `only: [slow-query]` — is now
+// accepted, because every documented rule is addressable, and leaves the
+// scanner with no rule to run: `sqlguard scan` reports nothing on any
+// codebase, which is indistinguishable from a clean scan.
+//
+// A list whose names are all unknown — `only: [selct-star]` — resolves to an
+// empty whitelist, and an empty whitelist is not a whitelist at all, so
+// *every* rule runs. The `unknown rule` warning alone does not say that the
+// narrowing the user asked for turned into its opposite.
+func checkOnlySelectsSomething(configured []string, resolved map[string]bool, warn func(string, ...any) error) error {
+	if len(configured) == 0 {
 		return nil
 	}
+	if len(resolved) == 0 {
+		return warn("rules.only named no rule that exists, so it selects nothing and every rule runs")
+	}
 	for _, name := range analyzer.EvaluatedRuleNames() {
-		if only[name] {
+		if resolved[name] {
 			return nil
 		}
 	}
@@ -302,9 +313,12 @@ type settingKind int
 const (
 	settingDuration settingKind = iota
 	settingInt
-	// settingPositiveInt additionally rejects zero and negatives, for a
-	// tunable where a non-positive value silently means "off".
+	// settingPositiveInt and settingPositiveDuration additionally reject zero
+	// and negatives, for a tunable where a non-positive value is never what
+	// anyone means: it either silently switches the feature off, or — for a
+	// latency threshold — matches every query and floods the reporter.
 	settingPositiveInt
+	settingPositiveDuration
 )
 
 // ruleSettings is the complete set of tunables, by rule and key. It is
@@ -314,8 +328,8 @@ const (
 // is the failure this validation exists to prevent. Adding a tunable to a rule
 // means adding it here.
 var ruleSettings = map[string]map[string]settingKind{
-	"slow-query":        {"threshold": settingDuration},
-	"n-plus-one":        {"threshold": settingPositiveInt, "window": settingDuration},
+	"slow-query":        {"threshold": settingPositiveDuration},
+	"n-plus-one":        {"threshold": settingPositiveInt, "window": settingPositiveDuration},
 	"leading-wildcard":  {"min-length": settingInt},
 	"in-list-too-large": {"max-length": settingInt},
 	"large-offset":      {"threshold": settingInt},
@@ -372,19 +386,15 @@ func checkSettings(rule string, kv map[string]any, warn func(string, ...any) err
 
 func checkSettingValue(rule, key string, kind settingKind, v any, warn func(string, ...any) error) error {
 	switch kind {
-	case settingDuration:
-		switch tv := v.(type) {
-		case string:
-			if _, err := time.ParseDuration(strings.TrimSpace(tv)); err != nil {
-				return warn("rule %q: setting %q: invalid duration %q", rule, key, tv)
-			}
-		case int, int64, float64:
-			// A bare number is milliseconds; Settings.Duration handles it.
-		default:
-			// Anything else — a bool, a list, a map — reads back as the
-			// default, which for n-plus-one.window means detection silently
-			// never switches on.
+	case settingDuration, settingPositiveDuration:
+		d, ok := asDuration(v)
+		if !ok {
+			// A bool, a list or a map reads back as the default, which for
+			// n-plus-one.window means detection silently never switches on.
 			return warn("rule %q: setting %q: expected a duration or a number, got %v", rule, key, v)
+		}
+		if kind == settingPositiveDuration && d <= 0 {
+			return warn("rule %q: setting %q must be greater than 0, got %v", rule, key, v)
 		}
 	case settingInt, settingPositiveInt:
 		n, ok := asInt(v)
@@ -400,6 +410,24 @@ func checkSettingValue(rule, key string, kind settingKind, v any, warn func(stri
 		}
 	}
 	return nil
+}
+
+// asDuration mirrors analyzer.Settings.Duration, so the check and the read
+// agree on both what parses and what it parses to. A value this rejects would
+// read back as the caller's default.
+func asDuration(v any) (time.Duration, bool) {
+	switch n := v.(type) {
+	case string:
+		d, err := time.ParseDuration(strings.TrimSpace(n))
+		return d, err == nil
+	case int:
+		return time.Duration(n) * time.Millisecond, true
+	case int64:
+		return time.Duration(n) * time.Millisecond, true
+	case float64:
+		return time.Duration(n * float64(time.Millisecond)), true
+	}
+	return 0, false
 }
 
 func asInt(v any) (int, bool) {
