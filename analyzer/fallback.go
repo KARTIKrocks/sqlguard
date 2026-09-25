@@ -55,7 +55,12 @@ var (
 	// inside a CTE body (a REPLACE() call in a WITH clause), and the INTO-less
 	// forms are MySQL-only, where the CTE-prefixed shape needs INTO anyway.
 	fbInsertHeadRe = regexp.MustCompile(`(?i)^\s*\(*\s*(?:INSERT|REPLACE|UPSERT)` + fbInsertModRe + `\b`)
-	fbDMLWordRe    = regexp.MustCompile(`(?i)\b(INSERT|UPDATE|DELETE)\b`)
+	// fbInsertLikeWordRe is fbLeadInsertLikeRe without the start anchor, for
+	// the CTE-prefixed forms where the keyword follows the WITH clause. The
+	// table-name requirement is what keeps a REPLACE(str, from, to) call inside
+	// a CTE body from being read as the statement.
+	fbInsertLikeWordRe = regexp.MustCompile(`(?i)\b(?:REPLACE|UPSERT)` + fbInsertModRe + `\s+(?:INTO\s+)?[^\s(]`)
+	fbDMLWordRe        = regexp.MustCompile(`(?i)\b(INSERT|UPDATE|DELETE)\b`)
 
 	// fbWhereRegionEndRe marks the first clause keyword that ends the WHERE
 	// region, so a function in ORDER BY / GROUP BY / HAVING isn't read as a
@@ -160,19 +165,23 @@ func (p *FallbackParser) Parse(sql string) (*Statement, error) {
 // both count as listed (no positional column-order risk to warn about).
 // Comment-free, literal-blanked input expected; heuristic by contract.
 func insertColumnsListed(sanitized string) bool {
-	// INTO is the tightest anchor and the only one that survives a CTE prefix,
-	// where the statement keyword itself can appear inside the CTE body. Fall
-	// back to the statement head for the forms that omit it.
+	// The statement head is the anchor whenever it starts the statement. Trying
+	// INTO first instead reads an identifier named "into" — a column name in a
+	// form that omits the keyword — as the clause, which makes the column list
+	// look like the target table and reports the columns as unlisted. Whether
+	// the real INTO stays in the span does not matter: it holds no "(".
 	var rest string
-	switch loc := fbIntoRe.FindStringIndex(sanitized); {
-	case loc != nil:
-		rest = sanitized[loc[1]:]
-	default:
-		head := fbInsertHeadRe.FindStringIndex(sanitized)
-		if head == nil {
-			return true // no recognizable statement head — can't tell, don't flag
-		}
+	switch head := fbInsertHeadRe.FindStringIndex(sanitized); {
+	case head != nil:
 		rest = sanitized[head[1]:]
+	default:
+		// A CTE prefix puts the keyword mid-statement, where it can also occur
+		// inside the CTE body, so INTO is the reliable anchor there.
+		loc := fbIntoRe.FindStringIndex(sanitized)
+		if loc == nil {
+			return true // no recognizable anchor — can't tell, don't flag
+		}
+		rest = sanitized[loc[1]:]
 	}
 	data := fbInsertDataRe.FindStringIndex(rest)
 	if data == nil {
@@ -501,6 +510,9 @@ func detectKind(sanitized string) StmtKind {
 			case "DELETE":
 				return StmtDelete
 			}
+		}
+		if fbInsertLikeWordRe.MatchString(sanitized) {
+			return StmtInsert
 		}
 		return StmtSelect
 	}

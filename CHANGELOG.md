@@ -29,7 +29,16 @@ the same version in lockstep.
   parsers already reported them while the fallback read them as an
   unrecognized statement kind and said nothing. `REPLACE(str, from, to)` is
   never mistaken for a statement, and a `REPLACE()` call inside a CTE does not
-  displace the real statement head.
+  displace the real statement head. A CTE prefix puts the keyword
+  mid-statement, past the leading-keyword check, so
+  `WITH c AS (…) UPSERT INTO t SELECT …` is covered too.
+- **A column named `into` no longer defeats `insert-without-columns`.** The
+  target table was found by scanning for `INTO` anywhere in the statement, so
+  ``INSERT t (`into`) VALUES (1)`` — a form that omits the optional keyword —
+  had its column list read as the target table and was reported as having no
+  columns. The statement head is now the anchor whenever it starts the
+  statement; `INTO` remains the anchor for the CTE-prefixed forms, where the
+  keyword sits mid-statement.
 
 ### Added
 

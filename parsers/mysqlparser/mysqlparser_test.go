@@ -184,6 +184,10 @@ func TestParser_NeverAddsFindingTheFallbackDoesNot(t *testing.T) {
 		"INSERT IGNORE INTO t VALUES (1)",
 		"REPLACE LOW_PRIORITY INTO t VALUES (1)",
 		"REPLACE DELAYED t VALUES (1)",
+		// A column named "into" in a statement that omits the INTO keyword:
+		// scanning for INTO anywhere reads the column list as the target table.
+		"INSERT t (`into`) VALUES (1)",
+		"REPLACE t (`into`) VALUES (1)",
 		"INSERT INTO t VALUES (1), (2)",
 		"SELECT REPLACE(name, 'a', 'b') FROM t",
 		"SELECT * FROM t WHERE a = 'REPLACE INTO x VALUES (1)'",
@@ -231,14 +235,18 @@ func TestParser_NeverAddsFindingTheFallbackDoesNot(t *testing.T) {
 }
 
 // needsCoreKeywordSupport reports whether a corpus entry's parity depends on
-// the core recognizing a row-inserting keyword other than "INSERT INTO".
+// the core recognizing a row-inserting keyword other than a leading
+// "INSERT INTO". It matches on the keyword appearing anywhere, not just at the
+// front, because a CTE prefix puts it mid-statement; an entry that merely
+// mentions REPLACE as a function is skipped too, which costs nothing.
 func needsCoreKeywordSupport(sql string) bool {
 	up := strings.ToUpper(strings.TrimSpace(sql))
-	if strings.HasPrefix(up, "INSERT INTO ") {
-		return false
+	if strings.Contains(up, "REPLACE") || strings.Contains(up, "UPSERT") {
+		return true
 	}
-	return strings.HasPrefix(up, "REPLACE") || strings.HasPrefix(up, "UPSERT") ||
-		strings.HasPrefix(up, "INSERT")
+	// INSERT with the optional INTO omitted.
+	i := strings.Index(up, "INSERT")
+	return i >= 0 && !strings.HasPrefix(strings.TrimSpace(up[i+len("INSERT"):]), "INTO")
 }
 
 func ruleSet(rs []analyzer.Result) map[string]struct{} {

@@ -140,6 +140,13 @@ func TestCheckInsertWithoutColumns(t *testing.T) {
 		{"replace function is not a statement", "SELECT REPLACE(name, 'a', 'b') FROM users", false},
 		{"replace function inside an insert", "INSERT INTO users (name) VALUES (REPLACE(x, 'a', 'b'))", false},
 		{"cte containing a replace call", "WITH s AS (SELECT REPLACE(a, 'x', 'y') AS n FROM u) INSERT INTO users SELECT n FROM s", true},
+		{"cte upsert no columns", "WITH s AS (SELECT 1 AS n) UPSERT INTO users SELECT n FROM s", true},
+		{"cte upsert with columns", "WITH s AS (SELECT 1 AS n) UPSERT INTO users (name) SELECT n FROM s", false},
+		// A column named "into" must not be read as the INTO clause, which
+		// would make the column list look like the target table.
+		{"column named into without the keyword", "INSERT users (`into`) VALUES ('alice')", false},
+		{"replace with a column named into", "REPLACE users (`into`) VALUES ('alice')", false},
+		{"column named into with the keyword", "INSERT INTO users (`into`) VALUES ('alice')", false},
 	}
 
 	for _, tt := range tests {
