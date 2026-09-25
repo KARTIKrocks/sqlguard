@@ -54,5 +54,9 @@
   },
   "engines": {
     "node": ">=20.0"
+  },
+  "overrides": {
+    "js-yaml": "^4.3.2",
+    "serialize-javascript": "^7.1.2"
   }
 }

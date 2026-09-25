@@ -9,6 +9,24 @@ the same version in lockstep.
 
 ## [Unreleased]
 
+### Security
+
+- **`parsers/pgparser` no longer pulls a six-year-old gRPC stack.**
+  `github.com/auxten/postgresql-parser` drags in `google.golang.org/grpc`,
+  `google.golang.org/protobuf` and `github.com/sirupsen/logrus` transitively,
+  and MVS was resolving them to `v1.33.1`, `v1.25.0` and `v1.6.0` — between
+  them the subject of eight advisories, including a CVSS 9.1 gRPC
+  authorization bypass ([CVE-2026-33186]). None was ever reachable: every gRPC
+  advisory is server-side (xDS RBAC, HTTP/2 transport) and a SQL parser starts
+  no gRPC server, which is why `make vuln` stayed green — `govulncheck`
+  reports on called symbols, dependency scanners report on the graph. They are
+  now `v1.83.2`, `v1.36.12` and `v1.9.3`, so both views agree. No API change;
+  `pgparser`'s own behaviour is unaffected.
+- The docs site build chain picked up the available patches for `fast-uri`,
+  `image-size`, `js-yaml`, `nanoid`, `joi`, `qs`, `svgo`, `smol-toml`,
+  `colord` and `serialize-javascript`. Build-time only — nothing here ships to
+  consumers of the Go modules or to readers of the published site.
+
 ## [0.5.0] - 2026-09-25
 
 ### Fixed
@@ -371,6 +389,7 @@ Initial public release.
   `integrations/bunguard`, `integrations/xormguard`, `integrations/entguard`.
 
 [Unreleased]: https://github.com/KARTIKrocks/sqlguard/compare/v0.5.0...HEAD
+[CVE-2026-33186]: https://pkg.go.dev/vuln/GO-2026-4762
 [0.5.0]: https://github.com/KARTIKrocks/sqlguard/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/KARTIKrocks/sqlguard/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/KARTIKrocks/sqlguard/compare/v0.2.0...v0.3.0

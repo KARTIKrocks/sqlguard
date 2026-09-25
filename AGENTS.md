@@ -85,6 +85,17 @@ Biome has no Markdown support, so prose is linted separately and repo-wide with
 not `docs.yml`, because `docs.yml` is path-filtered to `website/**` and would
 never see a README change.
 
+**The `overrides` block in `website/package.json` is a security pin, not a
+preference.** `js-yaml` and `serialize-javascript` reach the build only through
+Docusaurus, which pins versions with open advisories against them; the override
+forces the patched releases. `npm audit fix` cannot do this on its own — it
+proposes downgrading `@docusaurus/core` instead, which is worse. Drop an entry
+once Docusaurus ships a release that already resolves past it, and re-run
+`npm run check` after touching the block, since a transitive pin is exactly the
+kind of change that breaks the build rather than the lint. Advisories that
+remain are `webpack-dev-server`'s, which `npm start` uses and neither `ci.yml`
+nor `docs.yml` ever runs.
+
 **Versioning is by snapshot, not per release.** `website/docs/` is the
 unreleased/current documentation (served at `/docs/next/`);
 `website/versioned_docs/version-0.2/` is a frozen snapshot of what a released
