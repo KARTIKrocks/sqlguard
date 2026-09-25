@@ -3,13 +3,12 @@ module github.com/KARTIKrocks/sqlguard/integrations/xormguard
 go 1.27
 
 require (
-	github.com/KARTIKrocks/sqlguard v0.2.0
+	github.com/KARTIKrocks/sqlguard v0.3.0
 	github.com/mattn/go-sqlite3 v1.14.52
 	xorm.io/xorm v1.4.1
 )
 
 require (
-	github.com/go-sql-driver/mysql v1.10.1 // indirect
 	github.com/goccy/go-json v0.10.5 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/onsi/ginkgo v1.13.0 // indirect
