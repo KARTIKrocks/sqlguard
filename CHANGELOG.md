@@ -9,6 +9,8 @@ the same version in lockstep.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-25
+
 ### Fixed
 
 - **Every query is no longer analyzed twice when the base driver returns
@@ -368,7 +370,8 @@ Initial public release.
   `integrations/sqlxguard`, `integrations/pgxguard` (native pgx / pgxpool),
   `integrations/bunguard`, `integrations/xormguard`, `integrations/entguard`.
 
-[Unreleased]: https://github.com/KARTIKrocks/sqlguard/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/KARTIKrocks/sqlguard/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/KARTIKrocks/sqlguard/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/KARTIKrocks/sqlguard/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/KARTIKrocks/sqlguard/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/KARTIKrocks/sqlguard/compare/v0.1.1...v0.2.0
