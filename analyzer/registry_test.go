@@ -61,50 +61,56 @@ func TestRuleEnabledAnswersForEveryRegisteredRule(t *testing.T) {
 	}
 }
 
-// TestOnlyWhitelistReachesNonEvaluatedRules covers the semantic `only` now
-// carries: it is a whitelist across every surface, so a runtime or plan
-// finding not named in it is off.
-func TestOnlyWhitelistReachesNonEvaluatedRules(t *testing.T) {
+// TestRuleEnabledIgnoresOnly pins the semantic that makes `only:` mean one
+// thing everywhere: it selects which rules the Analyzer evaluates over a
+// statement, and the seven findings built outside that path are not evaluated,
+// so a whitelist written to focus `sqlguard scan` does not reach them.
+func TestRuleEnabledIgnoresOnly(t *testing.T) {
 	a := DefaultWithProfile(Profile{Only: map[string]bool{"select-star": true}})
 
-	if a.RuleEnabled("slow-query") {
-		t.Error("an `only` whitelist should exclude slow-query")
+	for _, name := range []string{
+		"slow-query", "n-plus-one",
+		"seq-scan", "high-cost", "full-table-scan", "no-index-used", "filesort",
+	} {
+		if !a.RuleEnabled(name) {
+			t.Errorf("an only whitelist should not reach %q", name)
+		}
 	}
-	if !a.RuleEnabled("select-star") {
-		t.Error("the whitelisted rule should stay enabled")
+
+	// The whitelist still does its job for the rules it is about.
+	if len(a.rules) != 1 || a.rules[0].name != "select-star" {
+		t.Errorf("expected only select-star bound, got %d rules", len(a.rules))
 	}
 }
 
-// TestRuleDisabledExplicitlyIgnoresOnly pins the one place where
-// RuleDisabledExplicitly is deliberately not the complement of RuleEnabled.
-// A whitelist turns a rule off for the analyzer and the runtime, but it does
-// not count as naming that rule, so `explain` keeps reporting it.
-func TestRuleDisabledExplicitlyIgnoresOnly(t *testing.T) {
-	a := DefaultWithProfile(Profile{Only: map[string]bool{"select-star": true}})
-
-	if a.RuleEnabled("seq-scan") {
-		t.Error("an only whitelist should leave seq-scan disabled for RuleEnabled")
-	}
-	if a.RuleDisabledExplicitly("seq-scan") {
-		t.Error("a whitelist is not the same as naming seq-scan in disable:")
-	}
-}
-
-func TestRuleDisabledExplicitlyHonoursDisable(t *testing.T) {
+func TestRuleEnabledHonoursDisable(t *testing.T) {
 	a := DefaultWithProfile(Profile{Disabled: map[string]bool{"seq-scan": true}})
 
-	if !a.RuleDisabledExplicitly("seq-scan") {
-		t.Error("seq-scan was named in disable: and should be reported so")
-	}
 	if a.RuleEnabled("seq-scan") {
-		t.Error("RuleEnabled should agree when the rule was named")
+		t.Error("seq-scan was named in disable: and should be reported off")
 	}
-	if a.RuleDisabledExplicitly("filesort") {
-		t.Error("filesort was not named and should not be reported disabled")
+	if !a.RuleEnabled("filesort") {
+		t.Error("filesort was not named and should stay on")
 	}
 	// An unregistered name is nobody's to turn off.
-	if a.RuleDisabledExplicitly("somebody-elses-rule") {
-		t.Error("an unregistered rule should never read as disabled")
+	if !a.RuleEnabled("somebody-elses-rule") {
+		t.Error("an unregistered rule should be reported enabled")
+	}
+}
+
+// TestRuleEnabledHonoursDisableInsideAnOnlyList is the escape hatch: `only:`
+// does not reach these findings, but naming one in `disable:` still does.
+func TestRuleEnabledHonoursDisableInsideAnOnlyList(t *testing.T) {
+	a := DefaultWithProfile(Profile{
+		Only:     map[string]bool{"select-star": true},
+		Disabled: map[string]bool{"slow-query": true},
+	})
+
+	if a.RuleEnabled("slow-query") {
+		t.Error("an explicit disable should still switch slow-query off")
+	}
+	if !a.RuleEnabled("n-plus-one") {
+		t.Error("n-plus-one was not named and should stay on")
 	}
 }
 

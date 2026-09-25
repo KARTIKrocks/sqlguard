@@ -34,13 +34,10 @@ type Analyzer struct {
 	rules    []boundRule
 	parser   Parser
 	severity map[string]Severity
-	// disabled is the resolved skip decision for every registered rule,
-	// including those this Analyzer does not run — see RuleEnabled. It folds
-	// in the `only` whitelist.
+	// disabled holds the rules turned off by name — `disable:`, or
+	// `severity: off`. It is what RuleEnabled answers from, and it does not
+	// fold in the `only` whitelist; see RuleEnabled for why.
 	disabled map[string]bool
-	// disabledByName holds only the rules turned off by name, without the
-	// whitelist — see RuleDisabledExplicitly.
-	disabledByName map[string]bool
 	// settings holds per-rule tunables for the same audience; the statement
 	// rules have theirs baked in by their factory at construction.
 	settings map[string]Settings
@@ -115,14 +112,12 @@ func Default() *Analyzer {
 func DefaultWithProfile(p Profile) *Analyzer {
 	all := specs()
 	var bound []boundRule
-	disabled := make(map[string]bool, len(all))
-	disabledByName := make(map[string]bool, len(p.Disabled))
+	disabled := make(map[string]bool, len(p.Disabled))
 	for _, spec := range all {
 		if p.Disabled[spec.Name] {
-			disabledByName[spec.Name] = true
+			disabled[spec.Name] = true
 		}
 		if p.skip(spec.Name) {
-			disabled[spec.Name] = true
 			continue
 		}
 		// Registered for addressability only — middleware and explain build
@@ -148,36 +143,34 @@ func DefaultWithProfile(p Profile) *Analyzer {
 		maps.Copy(settings, p.Settings)
 	}
 	return &Analyzer{
-		rules:          bound,
-		parser:         NewFallbackParser(),
-		severity:       sev,
-		disabled:       disabled,
-		disabledByName: disabledByName,
-		settings:       settings,
-		rawQuery:       p.RawQuery,
+		rules:    bound,
+		parser:   NewFallbackParser(),
+		severity: sev,
+		disabled: disabled,
+		settings: settings,
+		rawQuery: p.RawQuery,
 	}
 }
 
-// RuleEnabled reports whether the active profile leaves the named rule on,
-// applying both `disable` (including `severity: off`) and the `only`
-// whitelist. It answers for every registered rule, including the ones the
-// Analyzer does not evaluate: middleware asks before emitting `slow-query` or
-// `n-plus-one`.
+// RuleEnabled reports whether the profile leaves the named rule on, for a
+// finding built outside the statement path: middleware's `slow-query` and
+// `n-plus-one`, and the plan rules `explain` derives. Those have no Factory,
+// so the Analyzer never runs them and their owners ask here instead.
 //
-// An unregistered name is reported as enabled: an Analyzer built with New has
+// It answers `disable:` and `severity: off`. An `only:` whitelist is
+// deliberately **not** consulted: `only:` selects which rules the Analyzer
+// evaluates over a statement, and these are not evaluated at all. A list
+// written to focus `sqlguard scan` — overwhelmingly what `only:` is for —
+// would otherwise switch off slow-query and N+1 in a running application and
+// blank out `sqlguard explain`, none of which it mentions. Turning one of
+// these off takes naming it.
+//
+// For an evaluated rule the whitelist has already been applied: a rule it
+// excludes was never bound, so nothing asks this about it.
+//
+// An unregistered name is reported as enabled. An Analyzer built with New has
 // no profile, and a caller's own rule is not the profile's to turn off.
 func (a *Analyzer) RuleEnabled(name string) bool { return !a.disabled[name] }
-
-// RuleDisabledExplicitly reports whether the profile turned the named rule off
-// by naming it — `disable:`, or `severity: off`, which resolves to the same
-// thing.
-//
-// It is deliberately **not** the complement of RuleEnabled: it ignores the
-// `only` whitelist. `only:` selects which rules the analyzer runs over a
-// statement, and a list written to focus a scan should not also blank out
-// `sqlguard explain`, which is a separate command reporting on a plan the
-// database produced. Turning a plan rule off there takes naming it.
-func (a *Analyzer) RuleDisabledExplicitly(name string) bool { return a.disabledByName[name] }
 
 // RuleSeverity returns the severity to report for name, applying a profile
 // override to def when one is set.

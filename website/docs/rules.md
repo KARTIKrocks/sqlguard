@@ -45,8 +45,9 @@ runtime or plan rule as for a statement rule. In 0.2 only the 14 statement
 rules were — naming any of the other seven warned with `unknown rule`, and
 failed under `strict: true`.
 
-Two qualifications. `only:` applies to the scan and the runtime findings but
-[not to `sqlguard explain`](explain#what-it-detects). And `settings` only
+Two qualifications. `only:` is a whitelist over the rules evaluated against a
+statement, so it reaches neither the runtime findings nor the plan rules —
+see [what `only:` reaches](configuration#what-only-reaches). And `settings` only
 exists where a rule has a tunable: `leading-wildcard`, `in-list-too-large`,
 `large-offset`, `slow-query` and `n-plus-one` have them; the five plan rules
 have none and their thresholds are fixed, so a `settings` block for one is

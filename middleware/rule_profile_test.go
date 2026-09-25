@@ -198,15 +198,22 @@ func TestDisableBeatsExplicitGoOption(t *testing.T) {
 		}
 	})
 
-	t.Run("an only list that omits the rule also disables it", func(t *testing.T) {
+	t.Run("an only list does not reach the runtime findings", func(t *testing.T) {
 		rep := &countingReporter{}
 		g := profileGuard(t, analyzer.Profile{Only: map[string]bool{"select-star": true}}, rep,
-			WithSlowQueryThreshold(time.Millisecond))
+			WithSlowQueryThreshold(time.Millisecond), WithN1Detection(2, time.Minute))
 
 		g.CheckLatency("SELECT 1", time.Second)
 
-		if got := rep.snapshot(); len(got) != 0 {
-			t.Errorf("an `only` whitelist omitting slow-query should silence it, got %+v", got)
+		// `only:` selects which rules run over a statement. slow-query and
+		// n-plus-one are not evaluated over one, and a list written to focus
+		// `sqlguard scan` should not switch off a running app's latency and
+		// N+1 reporting without saying so.
+		if got := rep.snapshot(); len(got) != 1 || got[0].RuleName != "slow-query" {
+			t.Errorf("an `only` whitelist should not silence slow-query, got %+v", got)
+		}
+		if g.tracker == nil {
+			t.Error("an `only` whitelist should not stop the N+1 tracker being built")
 		}
 	})
 }

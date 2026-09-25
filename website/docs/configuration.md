@@ -83,7 +83,7 @@ scan:
 | `version` | all | Reserved for forward compatibility; always `1` today. |
 | `strict` | all | Make unknown keys, unknown rule names and bad severities fatal instead of warnings. |
 | `rules.disable` | every rule | Rule names to turn off. |
-| `rules.only` | every rule | Whitelist. When non-empty, a rule must be listed to run — and `disable` still applies to the ones that are, so listing and disabling the same rule disables it. |
+| `rules.only` | the scanner and the statement rules at runtime | Whitelist over the rules evaluated against a statement. `disable` still applies to the ones listed, so listing and disabling the same rule disables it. It does **not** reach `slow-query`, `n-plus-one` or the plan rules — see below. |
 | `rules.severity` | every rule | `info`, `warning`, `critical`, or `off`. |
 | `rules.settings` | rules with tunables | `leading-wildcard.min-length`, `in-list-too-large.max-length`, `large-offset.threshold`, `slow-query.threshold`, `n-plus-one.threshold` / `.window`. See [Rules](rules). |
 | `redact` | all | `false` keeps raw literals in `Result.Query`. See [Redaction](redaction). |
@@ -178,23 +178,37 @@ opts = append(opts, middleware.WithSlowQueryThreshold(time.Second))
 ```
 
 **Turning a rule off is the other way round: the file wins.** `disable:
-[slow-query]` or an `only:` list that omits it silences the finding even with
-`WithSlowQueryThreshold` set, and `disable: [n-plus-one]` stops the tracker
-being built at all despite `WithN1Detection`. That is deliberate — `disable`
-is an instruction, not a tuning value, and an operator editing
-`.sqlguard.yml` should be able to silence a noisy rule without a redeploy.
+[slow-query]` silences the finding even with `WithSlowQueryThreshold` set, and
+`disable: [n-plus-one]` stops the tracker being built at all despite
+`WithN1Detection`. That is deliberate — `disable` is an instruction, not a
+tuning value, and an operator editing `.sqlguard.yml` should be able to
+silence a noisy rule without a redeploy.
 
 `only:` narrows; it does not override. A rule has to survive both checks, so
 `only: [select-star]` together with `disable: [select-star]` leaves nothing.
 
 ## What `only:` reaches
 
-`only:` applies to the static scan and to the runtime findings, but **not to
-[`sqlguard explain`](explain)**. A whitelist is nearly always written to focus
-a scan, and it selects which rules run over a statement; if it reached the
-plan rules, a config that never mentions EXPLAIN would quietly turn that
-command into one that always reports nothing. To switch a plan rule off, name
-it in `disable:` or give it `severity: off` — both reach every surface.
+`only:` selects which rules run **against a statement** — the 14 in the
+scanner and at runtime. It does not reach the seven findings that are not
+derived from statement text: `slow-query` and `n-plus-one`, which the
+middleware computes from latency and repetition, and the five plan rules
+[`sqlguard explain`](explain) reads from the database's own plan.
+
+That is because a whitelist is nearly always written to focus a scan, and it
+names statement rules. If it reached the rest, `only: [select-star]` in a
+repository's config would also switch off latency and N+1 reporting in the
+running application, and make `sqlguard explain` report nothing — none of
+which it mentions, and none of which would produce a warning.
+
+To switch one of those off, name it: `disable:` and `severity: off` reach
+every surface.
+
+```yaml
+rules:
+  only: [select-star]        # scanner + runtime statement rules
+  disable: [slow-query]      # and this reaches the middleware too
+```
 
 Inline [suppressions](suppressions) win over both: they silence a finding at
 one site regardless of config.

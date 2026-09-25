@@ -5,8 +5,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/KARTIKrocks/sqlguard"
+	"github.com/KARTIKrocks/sqlguard/analyzer"
 	"github.com/KARTIKrocks/sqlguard/middleware"
 	"github.com/KARTIKrocks/sqlguard/reporter"
 
@@ -48,3 +50,44 @@ func TestMiddlewareOptionsAppliesProfile(t *testing.T) {
 		t.Errorf("select-star should be disabled via config, got:\n%s", buf.String())
 	}
 }
+
+// TestOnlyDoesNotSilenceRuntimeFindings goes end to end from the YAML shape a
+// repository actually ships: `only:` written to focus the scanner must not
+// switch off the running application's latency reporting. The config package
+// is where this can be asserted, since middleware cannot import it.
+func TestOnlyDoesNotSilenceRuntimeFindings(t *testing.T) {
+	c := &Config{Rules: RulesConfig{Only: []string{"select-star"}}}
+
+	opts, err := c.MiddlewareOptions()
+	if err != nil {
+		t.Fatalf("MiddlewareOptions: %v", err)
+	}
+
+	var got []analyzer.Result
+	opts = append(opts,
+		middleware.WithReporter(reporterFunc(func(rs []analyzer.Result) { got = append(got, rs...) })),
+		middleware.WithSlowQueryThreshold(time.Millisecond),
+	)
+	g := middleware.NewGuard(opts...)
+
+	g.CheckLatency("SELECT id FROM t WHERE id = ?", time.Second)
+
+	if len(got) != 1 || got[0].RuleName != "slow-query" {
+		t.Errorf("an `only:` list silenced slow-query in the running app: %+v", got)
+	}
+
+	// The whitelist still narrows the statement rules it is about.
+	a, err := c.Analyzer()
+	if err != nil {
+		t.Fatalf("Analyzer: %v", err)
+	}
+	for _, r := range a.Analyze("DELETE FROM sessions") {
+		if r.RuleName != "select-star" {
+			t.Errorf("only: [select-star] let %q through", r.RuleName)
+		}
+	}
+}
+
+type reporterFunc func([]analyzer.Result)
+
+func (f reporterFunc) Report(rs []analyzer.Result) { f(rs) }

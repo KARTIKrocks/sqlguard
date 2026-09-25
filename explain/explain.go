@@ -120,10 +120,8 @@ func planSeverity(name string) analyzer.Severity {
 // override. It runs once over the collected issues rather than at each site
 // that builds one, so a plan rule added later cannot forget the check.
 //
-// Only a rule named in `disable:` (or given `severity: off`) is dropped. An
-// `only:` whitelist is ignored here: it scopes which rules run over a
-// statement, and a list written to focus `sqlguard scan` would otherwise
-// leave this command silently reporting nothing.
+// Only a rule named in `disable:` (or given `severity: off`) is dropped —
+// see Analyzer.RuleEnabled for why an `only:` whitelist does not reach here.
 //
 // A severity override wins over a computed severity: `seq-scan` picks INFO or
 // WARNING from the estimated row count, and an explicit setting outranks both.
@@ -133,7 +131,7 @@ func (p *PlanAnalyzer) applyProfile(issues []analyzer.Result) []analyzer.Result 
 	}
 	kept := issues[:0]
 	for _, r := range issues {
-		if p.rules.RuleDisabledExplicitly(r.RuleName) {
+		if !p.rules.RuleEnabled(r.RuleName) {
 			continue
 		}
 		r.Severity = p.rules.RuleSeverity(r.RuleName, r.Severity)

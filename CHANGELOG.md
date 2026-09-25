@@ -39,11 +39,15 @@ the same version in lockstep.
   `WithSlowQueryThreshold` in Go still wins over the file.
 - **`explain` now honors `rules:` config.** It previously ignored it by
   design, which is what its docs said. A `severity` override also beats
-  `seq-scan`'s row-count-derived severity. `only:` is the exception and does
-  **not** reach EXPLAIN: a whitelist is written to focus a scan, and letting
-  it through would turn a config that never mentions EXPLAIN into one that
-  silently reports nothing there. Switching a plan rule off takes naming it in
-  `disable:` or `severity: off`.
+  `seq-scan`'s row-count-derived severity.
+- **`only:` is scoped to the rules evaluated against a statement.** It
+  narrows the scanner and the statement rules at runtime, and deliberately
+  does not reach `slow-query`, `n-plus-one` or the five plan rules. A
+  whitelist is written to focus a scan and names statement rules; if it
+  reached the rest, `only: [select-star]` in a repository's config would also
+  switch off latency and N+1 reporting in the running application and make
+  `sqlguard explain` report nothing, without naming any of them and without
+  warning. `disable:` and `severity: off` reach every surface.
 - **N+1 detection can be enabled from the config file.** Setting both
   `rules.settings.n-plus-one.threshold` and `.window` turns it on; it was
   previously reachable only from Go via `WithN1Detection`, which still takes
