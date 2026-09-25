@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -998,8 +999,21 @@ func TestScan_DotsDirectoryWarns(t *testing.T) {
 	root := t.TempDir()
 	queries := filepath.Join(root, "queries")
 	dots := filepath.Join(queries, "...")
+
+	// A directory named "..." is legal on Unix but not universally: Win32
+	// strips trailing dots from a path component, so the name cannot survive
+	// there. Skip on the fixture rather than on runtime.GOOS — that covers
+	// any filesystem which refuses the name or stores it under a different
+	// one, instead of hard-coding the list of platforms that do.
 	if err := os.MkdirAll(dots, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
+		t.Skipf("this filesystem will not create a directory named %q: %v", "...", err)
+	}
+	entries, err := os.ReadDir(queries)
+	if err != nil {
+		t.Fatalf("readdir: %v", err)
+	}
+	if !slices.ContainsFunc(entries, func(e os.DirEntry) bool { return e.Name() == "..." }) {
+		t.Skipf("this filesystem normalised the directory name away from %q", "...")
 	}
 	createTestFile(t, dots, "hidden.go", `package dots
 import "database/sql"

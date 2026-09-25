@@ -31,9 +31,10 @@ you genuinely have a directory named `...`, add a trailing slash
 argument is ambiguous, rather than reporting a clean run for a tree it never
 opened.
 
-_Changed in 0.3._ In 0.2 the pattern spelling was rejected outright —
-`sqlguard scan ./...` failed with `lstat ./...: no such file or directory` —
-so the form used throughout these docs had to be written as `sqlguard scan .`.
+_Changed in 0.3._ Pattern handling as a whole is new, including that warning.
+In 0.2 the spelling was rejected outright — `sqlguard scan ./...` failed with
+`lstat ./...: no such file or directory` — so the form used throughout these
+docs had to be written as `sqlguard scan .`, and no path was ever ambiguous.
 
 | Flag | Default | Effect |
 | --- | --- | --- |
