@@ -1,0 +1,88 @@
+{
+  "rules": [
+    {
+      "id": "fail-closed-on-unknown-shape",
+      "description": "Code that interprets an external, version-dependent shape (an EXPLAIN plan's columns, a SQL parser's output, a config file) must fail closed - return an error - when the shape is not what was expected, never silently degrade to 'found nothing'. A false negative in a query linter is worse than a hard failure. This was a real bug: a MySQL 9 EXPLAIN plan missing an expected column made every column lookup return the empty string and Analyze reported zero issues instead of erroring. Treat a change that removes a required-column check or turns an error into a default value as high severity.",
+      "files": ["explain/**/*.go", "analyzer/**/*.go", "config/**/*.go"],
+      "scope": ["pr", "ide"]
+    },
+    {
+      "id": "redaction-default",
+      "description": "Redaction is the default and there is exactly one canonical normalizer. Before any analyzer.Result leaves the process, Result.Query must be redacted through analyzer.Redact (unless the caller explicitly set rawQuery / WithRawQuery) and Result.Fingerprint must always be set, PII-free and low-cardinality, because it is used as a metric label. Never add a second normalizer - middleware.normalizeQuery delegates to analyzer.Fingerprint and the N+1 group key IS the fingerprint. Directly-built findings (slow-query, n-plus-one) must go through Analyzer.PrepareQuery. The explain package is the single deliberate exception: it keeps Result.Query raw because the user typed the query on their own CLI. Do not flag that, and do not extend the exception anywhere else.",
+      "files": ["analyzer/**/*.go", "middleware/**/*.go", "integrations/**/*.go", "reporter/**/*.go"],
+      "scope": ["pr", "ide"]
+    },
+    {
+      "id": "dual-reading-lexer",
+      "description": "Redact and IsMultiStatement scan SQL literals under more than one dialect reading and neither may be collapsed to a single pass. Redact must never leave a literal byte in its output: it always treats $tag$...$tag$ as a literal and varies only the backslash reading (\\' escapes in MySQL's default sql_mode and in Postgres E'...' strings, but not under standard_conforming_strings), redacting the UNION of both readings so ambiguous SQL is over-redacted. IsMultiStatement must never miss a ';': it never honors backslash escapes and varies the $$ reading instead, refusing when ANY reading leaves a ';' outside a literal - each reading is blind to a payload the other catches (UPDATE t AS $$ SET id = 1; DROP TABLE t versus SELECT $$'$$; DROP TABLE t). stripComments and blankLiterals must agree about dollar quotes. IsMultiStatement is explain's stacked-statement guard, and the MySQL --allow-dml path runs read-write where DDL implicit-commits past the rollback, so weakening it is a security bypass, not a refactor. Flag any change that drops a reading, makes the two lexers disagree, or deletes TestRedactNoLeakAcrossDialectAmbiguity or TestIsMultiStatementNeedsBothReadings.",
+      "files": ["analyzer/redact.go", "analyzer/fallback.go", "analyzer/*_test.go"],
+      "scope": ["pr", "ide"]
+    },
+    {
+      "id": "single-analysis-core",
+      "description": "middleware.Guard (Check / CheckLatency / Observe / ResetN1 / Analyzer) is the single analysis core. Every interception point in the driver chain and every out-of-tree integration must route through one Guard; integrations/pgxguard is the reference example. Flag any hand-rolled check or latency logic that bypasses it - that shape silently loses redaction-by-default, fingerprints, the parser seam, file config, N+1, dedup and the analysis cache. Per-query work must stay allocation-light and config-free: enable/disable, severity and settings are resolved once in NewGuard and DefaultWithProfile, never per query.",
+      "files": ["middleware/**/*.go", "integrations/**/*.go"],
+      "scope": ["pr", "ide"]
+    },
+    {
+      "id": "analyze-once-per-execution",
+      "description": "A query must be analyzed exactly once per execution. Every interception point in middleware/driver.go analyzes AFTER calling the base driver, never before, because whether the query ran is knowable only from the base's answer. Two answers mean it did not run and database/sql re-issues the same logical query: driver.ErrSkip (the base declined a direct Query/Exec and database/sql falls back to Prepare+Query, which re-enters via wStmt - go-sql-driver/mysql returns this for every parameterized query unless interpolateParams=true) and driver.ErrBadConn (the connection was dead, and database/sql retries on another connection up to twice more). Analyzing a declined attempt multiplies one logical query by two or three; the duplicate static finding hides behind the dedup window but the inflated N+1 count silently lowers the configured threshold. Argument conversion must also run before analysis. Flag any change that moves analysis ahead of the base call or restores Guard.Observe here.",
+      "files": ["middleware/driver.go", "middleware/driver_fallback_test.go"],
+      "scope": ["pr", "ide"]
+    },
+    {
+      "id": "driver-optional-interfaces",
+      "description": "middleware/driver.go structurally implements the optional database/sql driver interfaces (QueryerContext, ExecerContext, Pinger, SessionResetter, Validator, NamedValueChecker, ConnPrepareContext, StmtExecContext, StmtQueryContext) on every wrapper type, forwarding to the base only when the base implements that interface and otherwise returning driver.ErrSkip or a documented no-op so database/sql falls back exactly as it would for the bare driver. Do not simplify this away - it preserves base-driver behavior. The deprecated-path delegations (base.Begin, legacy Queryer/Execer, Stmt.Exec/Query) are deliberate and carry //nolint:staticcheck with an explanation; a faithful wrapper must delegate to whatever the wrapped driver exposes, so do not suggest removing them. The wrapper must never modify the SQL text or the arguments.",
+      "files": ["middleware/driver.go"],
+      "scope": ["pr", "ide"]
+    },
+    {
+      "id": "core-dependency-purity",
+      "description": "The analyzer, middleware and reporter packages must stay free of third-party dependencies and of any YAML library. config is the only YAML-aware package and nothing may depend on it from those three, which is what keeps gopkg.in/yaml.v3 out of a library consumer's import graph. Flag any new external import added under analyzer/, middleware/ or reporter/, and any new require in the root go.mod that is not clearly CLI-only. The CLI's own deps (cobra, x/tools, sqlite3 in tests, and the pgx/mysql drivers blank-imported by cmd/sqlguard/db.go) are fine where they are, because Go links per imported package.",
+      "files": ["analyzer/**/*.go", "middleware/**/*.go", "reporter/**/*.go", "go.mod"],
+      "scope": ["pr", "ide"]
+    },
+    {
+      "id": "explain-never-executes",
+      "description": "The EXPLAIN analyzer must never execute the statement it plans. Keep BeginTx plus an unconditional deferred Rollback, never use EXPLAIN ANALYZE, and keep validate()'s SELECT/WITH-only default (DML only behind WithAllowDML) and its analyzer.IsMultiStatement rejection - never replace that with strings.Contains(query, \";\"), which a comment or string literal defeats. The transaction is read-only everywhere EXCEPT MySQL/MariaDB under --allow-dml (BeginTx ReadOnly: !dml), because those servers reject every statement inside a read-only transaction with error 1792, including a planning-only EXPLAIN; do not restore ReadOnly:true there. EXPLAIN takes no bind parameters, so concatenation is unavoidable by design - the defense is validate() plus the always-rolled-back transaction, not parameterization. Plan columns are addressed by name, never by position (MariaDB emits 10 columns where MySQL emits 12), and rows whose table starts with '<' are derived/UNION temporaries that are skipped on purpose.",
+      "files": ["explain/**/*.go", "cmd/sqlguard/**/*.go"],
+      "scope": ["pr", "ide"]
+    },
+    {
+      "id": "rules-self-register",
+      "description": "A new analyzer rule must be one analyzer.Register(RuleSpec{...}) call from init() in analyzer/rules.go - do not hand-maintain a rule list in Default(). Being addressable by name is what makes enable/disable, severity overrides, per-rule settings and suppressions work uniformly. Rules read the normalized analyzer.Statement produced by the configured Parser and must never re-parse or pattern-match raw SQL themselves. The seven rules with a nil Factory (slow-query, n-plus-one, seq-scan, high-cost, full-table-scan, no-index-used, filesort) are registered to be addressable even though the Analyzer never evaluates them; their owners ask RuleEnabled / RuleSeverity / RuleSettings. RuleEnabled deliberately ignores the only: whitelist - do not 'fix' that. All seven register in analyzer/rules.go and not in the packages that own them, so config can validate names while importing only analyzer.",
+      "files": ["analyzer/**/*.go", "config/**/*.go"],
+      "scope": ["pr", "ide"]
+    },
+    {
+      "id": "parser-never-breaks-query-path",
+      "description": "An analyzer.Parser must never let a parse failure break the caller's query path: analyzer.Analyze degrades to the FallbackParser, and a dialect parser returns a best-effort Statement (Exact=false) rather than an error. A dialect parser may only REMOVE findings, never add one: opting into a real grammar is sold as trading false positives away, and the reporting surface is identical so nothing would warn. When a parser learns a statement kind, the zero-dependency fallback has to learn it too - detectKind and insertColumnsListed are the pair to check - and a new structural field read by a rule needs a corpus row in TestParser_NeverAddsFindingTheFallbackDoesNot. The dialect parsers intentionally keep MaxInListLen, ImplicitCommaJoin and CartesianJoin as fallback heuristics; that carve-out is documented, not a bug.",
+      "files": ["parsers/**/*.go", "analyzer/analyzer.go", "analyzer/fallback.go", "analyzer/parser.go", "analyzer/statement.go"],
+      "scope": ["pr", "ide"]
+    },
+    {
+      "id": "hot-path-allocation",
+      "description": "analyzer.Analyze and middleware.Guard.Check run on every intercepted query in a live application. Flag a new heap allocation, map creation, regexp compilation or unbounded growth added to that path. Config resolution and rule enable/disable happen once at construction (Profile, DefaultWithProfile, NewGuard), never per query. Cached result slices are shared and read-only - do not mutate them (see Guard.report, which allocates only when a finding actually passes dedup). The analysis cache is keyed on the exact query string rather than the fingerprint on purpose, because a few rules read literal-derived facts the fingerprint folds away. Dedup and N+1 use bounded maps; keep them bounded. If an allocation there is genuinely unavoidable, say so rather than reporting it as an oversight.",
+      "files": ["analyzer/**/*.go", "middleware/**/*.go"],
+      "scope": ["pr", "ide"]
+    },
+    {
+      "id": "nine-modules-in-lockstep",
+      "description": "This repo is nine Go modules (root, parsers/pgparser, parsers/mysqlparser, and six integrations/*) plus the unpublished test/integration module, all on the same Go version and released in lockstep. A public API change or a Go version bump must update every go.mod and .github/workflows/ci.yml together, and a dependency change must be followed by `make tidy` across all of them - tidying only the root leaves the others stale. No go.mod in this repo has a replace directive: the committed go.work is what points the satellites at this tree, so do not suggest adding one. Flag a change that touches one module's go.mod where the same change is required in the others.",
+      "files": ["**/go.mod", "go.work", ".github/workflows/*.yml", "Makefile"],
+      "scope": ["pr", "ide"]
+    },
+    {
+      "id": "website-docs-version-markers",
+      "description": "website/docs is the unreleased documentation; website/versioned_docs holds frozen release snapshots that must never be edited, because changing one rewrites history for users still on that version. A documented API addition must carry a version marker in one of these exact forms: _X.Y+_ appended to an API table cell, _Added in X.Y._ opening a prose paragraph, or a trailing // X.Y+ comment inside a code block. Changed behaviour takes _Changed in X.Y._ plus one line on what it was before. Every option, function and rule name in the docs must match an exported identifier or a registered rule name exactly - a wrong name is a support burden, not a typo. Internal links are checked at build time and intro.md uses slug: / so its links must be file-relative.",
+      "files": ["website/docs/**/*.md", "website/docs/**/*.mdx", "README.md", "CHANGELOG.md"],
+      "scope": ["pr", "ide"]
+    },
+    {
+      "id": "go-exported-docs",
+      "description": "Every new or newly-exported type, function, method and constant needs a doc comment starting with the identifier's own name - revive's exported rule is enabled in .golangci.yml. Type names must not stutter with their package (explain.Result, not explain.ExplainResult). Modern Go idioms are expected repo-wide: range-over-int, any over interface{}, and compile-time interface-satisfaction asserts in the form var _ I = (*T)(nil).",
+      "files": ["**/*.go", "!**/*_test.go"],
+      "scope": ["pr", "ide"]
+    }
+  ]
+}

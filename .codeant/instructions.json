@@ -1,0 +1,58 @@
+{
+  "instructions": [
+    {
+      "id": "repo-context",
+      "description": "sqlguard (github.com/KARTIKrocks/sqlguard) is a near-zero-dependency, security-conscious SQL query analyzer for Go: a database/sql driver-layer middleware, a static CLI scanner and an EXPLAIN-plan analyzer sharing one analyzer/reporter core. It is a defensive security tool - a bug that lets it silently miss a dangerous query, leak a raw literal, or actually execute a statement during EXPLAIN is a security bug rather than a style nit (see SECURITY.md). Prioritise fail-closed behaviour, PII redaction, concurrency safety and not altering query semantics over style. The project is pre-release with no backward-compatibility guarantee: prefer the clean redesign over preserving an existing public API, and do not suggest deprecation shims, compat layers or add-alongside variants. AGENTS.md is the authoritative description of the architecture and its invariants; read it before proposing a structural change.",
+      "files": ["**/*"],
+      "scope": ["pr", "ide"]
+    },
+    {
+      "id": "deliberate-driver-chain-shape",
+      "description": "middleware/driver.go hand-implements the standard database/sql wrapping chain (Driver + DriverContext, Connector, Conn, Stmt, Tx) with zero dependencies. Its parallel Query/Exec branches and its per-type optional-interface methods are deliberately repetitive: each branch forwards to a different optional base interface, and collapsing them changes fallback behaviour. Do not report this file for duplication, and do not report the //nolint:staticcheck deprecated delegations - they are required for a faithful wrapper and each carries an explanation (nolintlint enforces that).",
+      "files": ["middleware/driver.go", "middleware/*_test.go"],
+      "scope": ["pr", "ide"]
+    },
+    {
+      "id": "explain-keeps-query-raw",
+      "description": "The explain package deliberately keeps Result.Query - and the Query of the analyzer.Results it builds - RAW rather than redacted, because the user typed the statement on their own CLI and it never reaches a log or telemetry sink. Fingerprint is still always set. Do not report explain findings as a redaction miss. Likewise, the EXPLAIN string is built by concatenation because EXPLAIN takes no bind parameters; do not suggest parameterizing it.",
+      "files": ["explain/**/*.go"],
+      "scope": ["pr", "ide"]
+    },
+    {
+      "id": "cli-driver-imports-are-intentional",
+      "description": "cmd/sqlguard/db.go blank-imports github.com/jackc/pgx/v5/stdlib and github.com/go-sql-driver/mysql so `sqlguard explain` can connect. Only this package imports them, and Go links per imported package, so a library consumer of analyzer or middleware never links them. Do not report these as a core-dependency violation and do not suggest moving them into explain/ - that WOULD put database drivers in the library import graph.",
+      "files": ["cmd/sqlguard/**/*.go"],
+      "scope": ["pr", "ide"]
+    },
+    {
+      "id": "library-not-application",
+      "description": "This is a published library, so exported identifiers with no in-repo caller are the public API, not dead code - consumers are the callers. The same applies to the optional driver interface methods in middleware/driver.go, which exist so database/sql's type assertions succeed. golangci-lint's `unused` runs in CI and understands these Go semantics; prefer its verdict over a generic reachability heuristic.",
+      "files": ["**/*.go"],
+      "scope": ["pr", "ide"]
+    },
+    {
+      "id": "test-conventions",
+      "description": "Run anything touching middleware with -race: the driver chain, QueryTracker and the caches are concurrent. A test for a fixed bug should prove the failure mode - the convention here is that a regression test must fail against the unfixed code, and several assert exact analysis counts for that reason. errcheck, gosec, bodyclose, errorlint, noctx and perfsprint are intentionally relaxed in _test.go files (see .golangci.yml exclusions), so do not report those there. test/integration is a separate, unpublished module behind the `integration` build tag so `go test ./...` stays Docker-free; do not suggest removing the tag, folding it into the core module, or replacing its live-database assertions with mocks - the tabular EXPLAIN output it pins is server-version-dependent, which is exactly why it cannot be a unit test.",
+      "files": ["**/*_test.go", "test/integration/**/*"],
+      "scope": ["pr", "ide"]
+    },
+    {
+      "id": "test-fixture-credentials",
+      "description": "test/integration/docker-compose.yml contains throwaway credentials (user, password and database all 'sqlguard') for local, ephemeral containers on deliberately non-default host ports. They are fixtures for `make db-up`, are never used against a real server, and are not a leaked secret. Report a credential in this file only if it looks like a real one.",
+      "files": ["test/integration/docker-compose.yml"],
+      "scope": ["pr", "ide"]
+    },
+    {
+      "id": "docs-site-conventions",
+      "description": "The docs site is Docusaurus under website/, linted and formatted by Biome (website/biome.json) and type-checked by TypeScript; prose is linted repo-wide by markdownlint (.markdownlint-cli2.jsonc) via `make lint-docs`, not by Biome. website/docs is the unreleased tree and website/versioned_docs holds frozen snapshots that are cut with `npm run cut-version` and never hand-edited - do not propose changes there. Node-side files (docusaurus.config.ts, sidebars, scripts) must not use browser APIs, and both docusaurus.config.ts and scripts/cut-version.mjs read MAX_LIVE_VERSIONS from versions.config.json rather than duplicating it.",
+      "files": ["website/**/*"],
+      "scope": ["pr", "ide"]
+    },
+    {
+      "id": "ci-already-covers",
+      "description": "`make ci` runs gofmt/goimports checks, go vet, golangci-lint (v2 schema, .golangci.yml - including gosec, staticcheck, unused, gocyclo at min-complexity 15, revive's exported rule, errorlint, bodyclose, nilerr, contextcheck and the allocation linters), govulncheck, `go test -race`, and markdownlint, across all nine modules; a separate workflow runs CodeQL. Prefer findings those tools cannot produce - design, invariant and cross-module reasoning - over restating a lint that already gates the build.",
+      "files": ["**/*"],
+      "scope": ["pr", "ide"]
+    }
+  ]
+}

@@ -113,3 +113,34 @@ must be file-relative (`./middleware.md`), not id-relative.
 - **Pre-release, no backward compatibility.** Nothing is shipped. Prefer the clean design over preserving existing public APIs; do not add deprecation shims or compat layers. When a better design presents itself, replace rather than add-alongside.
 - Modern Go idioms expected (range-over-int, compile-time interface-satisfaction asserts `var _ I = (*T)(nil)`, `any`).
 - Lint config specifics: `revive`'s `exported` rule is **enabled** — exported symbols need a doc comment (starting with the symbol name), and type names must not stutter with their package (e.g. `explain.Result`, not `explain.ExplainResult`); `gocyclo` min-complexity is 15; `errcheck` is relaxed in `_test.go`.
+
+## AI reviewer configuration
+
+Four reviewers are configured from files in this repo, and they are kept in
+sync by hand:
+
+- `.coderabbit.yaml` — CodeRabbit: `path_filters`, per-path `path_instructions`,
+  and the linters it re-runs (golangci-lint, gitleaks, actionlint, markdownlint,
+  biome).
+- `.greptile/` — Greptile: `config.json` (scoped rules with ids and severities,
+  ignore patterns), `files.json` (the files it should read for context), and
+  `rules.md` (prose rationale with worked examples from real bugs).
+- `.codeant/` — CodeAnt AI: `review.json` (rules), `instructions.json`
+  (context that prevents false positives), `configuration.json` (which
+  analyses run, and over which files) and `quality_gates_conditions.json`.
+  `.codeant/README.md` documents each choice.
+- This file, which every coding agent reads.
+
+**An invariant documented here belongs in all of them.** Each config is the
+same knowledge aimed at a different reviewer, so a new invariant — or a
+correction to one — is only half-landed if it lives in one file. Rule ids are
+deliberately shared across `.greptile/config.json` and `.codeant/review.json`
+(`redaction-default`, `explain-never-executes`, `analyze-once-per-execution`,
+…) so one invariant has one name wherever it is reported. The same applies in
+reverse: a rule that turns out to be wrong is wrong in three places.
+
+Prefer a rule that states the invariant and its reason over one that restates
+a lint. `make ci` already gates gofmt, `go vet`, golangci-lint, govulncheck,
+`go test -race` and markdownlint across all nine modules, and a separate
+workflow runs CodeQL; review budget is better spent on the cross-module and
+design reasoning those tools cannot do.

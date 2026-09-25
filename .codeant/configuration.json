@@ -1,0 +1,42 @@
+{
+  "code_analysis": {
+    "enabled": true,
+    "features": {
+      "sast_analysis": "enabled",
+      "secrets_analysis": "enabled",
+      "sca_analysis": "enabled",
+      "iac_analysis": "enabled",
+      "antipatterns_analysis": "enabled",
+      "docstring_analysis": "enabled",
+      "complex_function_analysis": "enabled",
+      "deadcode_analysis": "disabled",
+      "duplicatecode_analysis": "disabled"
+    },
+    "config": {
+      "complexity": {
+        "maintainability_index": 15
+      }
+    }
+  },
+  "file_filters": {
+    "config": {
+      "include_files": "",
+      "exclude_files": "bin/**,dist/**,**/node_modules/**,website/build/**,website/.docusaurus/**,website/versioned_docs/**,website/versioned_sidebars/**,website/static/**"
+    }
+  },
+  "review_configuration": {
+    "exclude": [
+      "bin/**",
+      "dist/**",
+      "**/node_modules/**",
+      "**/package-lock.json",
+      "**/go.sum",
+      "**/testdata/**",
+      "website/build/**",
+      "website/.docusaurus/**",
+      "website/versioned_docs/**",
+      "website/versioned_sidebars/**",
+      "website/static/**"
+    ]
+  }
+}

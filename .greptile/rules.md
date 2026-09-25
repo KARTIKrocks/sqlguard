@@ -96,6 +96,51 @@ therefore be an EXPLAIN bypass. `TestRedactNoLeakAcrossDialectAmbiguity` and
 `TestIsMultiStatementNeedsBothReadings` pin all of this; a change that deletes
 either test needs to justify itself.
 
+## One execution, one analysis — worked example
+
+`analyze-once-per-execution` exists because `database/sql` re-issues a query
+more often than the wrapper's shape suggests, and the original code analyzed
+before handing the query to the base driver. That was correct only for a base
+with no direct `Queryer`/`Execer` at all, which the comment there addressed.
+Two other answers mean "this did not run", and both re-enter the chain:
+
+- `driver.ErrSkip` is a **per-call** answer, not only a per-driver one. A base
+  that implements `QueryerContext` may still decline an individual query, and
+  `database/sql` then falls back to Prepare+Query, which re-enters through
+  `wStmt` and analyzes there. `go-sql-driver/mysql` answers `ErrSkip` for
+  every parameterized query unless `interpolateParams=true`, which is off by
+  default — so on MySQL essentially all application traffic was analyzed
+  twice (issue #67).
+- `driver.ErrBadConn` means the connection was already dead. Its contract
+  forbids returning it when the operation may have been performed, so nothing
+  executed, and `database/sql` retries the whole query on another connection —
+  twice from the pool, then once on a fresh one. A stale pool (MySQL's
+  `wait_timeout`, a restart, a failover) therefore produced **three** analyses
+  for one logical query.
+
+The visible damage is not the duplicate static finding — that hides behind the
+default one-minute dedup window, which is why the bug went unnoticed. It is
+the N+1 counter, which is not deduped: `WithN1Detection(10, …)` fired at five
+real queries on MySQL, so every configured threshold was silently halved.
+
+The fix is one shape, applied at every interception point in `driver.go`: call
+the base, then `analyzeExecuted`, which returns without analyzing when the
+answer is `ErrSkip` or `ErrBadConn`. Two consequences are deliberate. Analysis
+happens after execution, which is fine because nothing consumes findings
+before the query runs; and the latency window is read before the rules run, so
+analysis time cannot push a query past the slow-query threshold. Argument
+conversion also moved ahead of analysis, so a call rejected with
+"driver does not support named parameters" — which never reaches the database
+— is no longer counted.
+
+`Guard.Observe` (check, then time) survives for interception points that are
+only ever told a query ran: the out-of-tree integrations. Nothing in
+`driver.go` is in that position, so restoring it there reintroduces the bug.
+The regression tests are fake drivers rather than assertions on internals —
+`fakeErrSkipDriver` and `fakeBadConnDriver` in
+`middleware/driver_fallback_test.go` — and each fails against the unfixed code
+with an exact count (2, 3, or a tripped N+1 threshold).
+
 ## Module topology
 
 Nine Go modules (root, `parsers/pgparser`, `parsers/mysqlparser`, and six
