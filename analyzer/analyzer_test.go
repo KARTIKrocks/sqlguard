@@ -119,6 +119,34 @@ func TestCheckInsertWithoutColumns(t *testing.T) {
 		{"mysql set form", "INSERT INTO users SET name = 'alice', email = 'a@test.com'", false},
 		{"default values", "INSERT INTO users DEFAULT VALUES", false},
 		{"cte insert no columns", "WITH s AS (SELECT 1) INSERT INTO users SELECT * FROM s", true},
+		// REPLACE is MySQL/SQLite's insert-or-overwrite; positionally it is an
+		// INSERT and carries the same column-order risk. A real MySQL grammar
+		// parses it into the same AST node, so reading it as StmtOther here
+		// made the rule fire only for callers who opted into mysqlparser.
+		{"replace no columns", "REPLACE INTO users VALUES ('alice')", true},
+		{"replace with columns", "REPLACE INTO users (name) VALUES ('alice')", false},
+		// INTO is optional in MySQL for both keywords, and a modifier run may
+		// sit between the keyword and the table.
+		{"replace without into", "REPLACE users VALUES ('alice')", true},
+		{"replace without into with columns", "REPLACE users (name) VALUES ('alice')", false},
+		{"insert without into", "INSERT users VALUES ('alice')", true},
+		{"insert without into with columns", "INSERT users (name) VALUES ('alice')", false},
+		{"insert with modifier", "INSERT LOW_PRIORITY INTO users VALUES ('alice')", true},
+		{"replace delayed without into", "REPLACE DELAYED users VALUES ('alice')", true},
+		// UPSERT reaches the INSERT node in the grammar behind pgparser.
+		{"upsert no columns", "UPSERT INTO users VALUES ('alice')", true},
+		{"upsert with columns", "UPSERT INTO users (name) VALUES ('alice')", false},
+		// REPLACE(str, from, to) is a string function, not a statement.
+		{"replace function is not a statement", "SELECT REPLACE(name, 'a', 'b') FROM users", false},
+		{"replace function inside an insert", "INSERT INTO users (name) VALUES (REPLACE(x, 'a', 'b'))", false},
+		{"cte containing a replace call", "WITH s AS (SELECT REPLACE(a, 'x', 'y') AS n FROM u) INSERT INTO users SELECT n FROM s", true},
+		{"cte upsert no columns", "WITH s AS (SELECT 1 AS n) UPSERT INTO users SELECT n FROM s", true},
+		{"cte upsert with columns", "WITH s AS (SELECT 1 AS n) UPSERT INTO users (name) SELECT n FROM s", false},
+		// A column named "into" must not be read as the INTO clause, which
+		// would make the column list look like the target table.
+		{"column named into without the keyword", "INSERT users (`into`) VALUES ('alice')", false},
+		{"replace with a column named into", "REPLACE users (`into`) VALUES ('alice')", false},
+		{"column named into with the keyword", "INSERT INTO users (`into`) VALUES ('alice')", false},
 	}
 
 	for _, tt := range tests {

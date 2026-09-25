@@ -32,7 +32,7 @@ sqlguard explain --db "…" --format json "SELECT …"
 | `--db <dsn>` | required | Connection string. Postgres DSNs use pgx's `postgres://` URL or key=value form; MySQL uses `go-sql-driver/mysql` DSN syntax. |
 | `--dialect postgres\|mysql` | `postgres` | Which planner to talk to. MariaDB works through `mysql`. |
 | `--format console\|json` | `console` | Output shape. |
-| `--allow-dml` | off | Permit `INSERT` / `UPDATE` / `DELETE`. Still planned only, still rolled back. |
+| `--allow-dml` | off | Permit `INSERT` / `UPDATE` / `DELETE` (incl. `REPLACE` / `UPSERT` _0.5+_). Still planned only, still rolled back. |
 | `--config`, `--no-config` | — | Persistent flags. `rules:` config applies — see below. |
 
 The whole command runs under a 30-second timeout, including the initial
@@ -122,6 +122,13 @@ not rely on parameterization:
    `SELECT` / `WITH` pass; `INSERT` / `UPDATE` / `DELETE` pass only with
    `--allow-dml`; DDL, `SET`, transaction control and anything unrecognised
    are always refused.
+
+   _Changed in 0.5._ The row-inserting dialect keywords `REPLACE` and
+   `UPSERT` now classify as `INSERT` rather than as unrecognised, so
+   `--allow-dml` admits them instead of refusing them outright. They are
+   planned and rolled back like any other DML. On a server where the
+   keyword is not valid you now get that server's syntax error in place of
+   sqlguard's refusal.
 
    _Changed in 0.3._ The separator check previously scanned with a single
    reading of `$$`, which let some stacked input through. It now counts a `;`

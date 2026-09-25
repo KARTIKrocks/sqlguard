@@ -9,6 +9,60 @@ the same version in lockstep.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`pgparser` no longer reports `insert-without-columns` on
+  `INSERT INTO t DEFAULT VALUES`** ([#68]). The grammar encodes that form as
+  an absent row source, and the parser refilled `InsertColumnsListed` from
+  `len(Columns)` alone after blanking it — so the AST path dropped the
+  fallback's explicit handling ("DEFAULT VALUES inserts no data") and then
+  marked the result `Exact`. Opting into the exact parser made this rule
+  strictly worse than the zero-dependency default, inverting the trade-off
+  documented in [SQL Parsers](https://kartikrocks.github.io/sqlguard/docs/parsers).
+- **`insert-without-columns` now covers every keyword that inserts rows
+  positionally**, not just `INSERT INTO`: MySQL/SQLite's `REPLACE`, the
+  `UPSERT` the CockroachDB-derived grammar behind `pgparser` accepts, and the
+  forms that omit MySQL's optional `INTO` (`INSERT t VALUES (…)`,
+  `REPLACE t VALUES (…)`), including a `LOW_PRIORITY`/`DELAYED`/`IGNORE`
+  modifier run. All bind by column order and carry the same schema-change
+  risk, and all are the same AST node to a real grammar — so the dialect
+  parsers already reported them while the fallback read them as an
+  unrecognized statement kind and said nothing. `REPLACE(str, from, to)` is
+  never mistaken for a statement, and a `REPLACE()` call inside a CTE does not
+  displace the real statement head. A CTE prefix puts the keyword
+  mid-statement, past the leading-keyword check, so
+  `WITH c AS (…) UPSERT INTO t SELECT …` is covered too.
+- **A column named `into` no longer defeats `insert-without-columns`.** The
+  target table was found by scanning for `INTO` anywhere in the statement, so
+  ``INSERT t (`into`) VALUES (1)`` — a form that omits the optional keyword —
+  had its column list read as the target table and was reported as having no
+  columns. The statement head is now the anchor whenever it starts the
+  statement; `INTO` remains the anchor for the CTE-prefixed forms, where the
+  keyword sits mid-statement.
+
+### Added
+
+- **Parser parity is pinned by a test.** `pgparser` and `mysqlparser` each run
+  a corpus through both the dialect grammar and the fallback and assert the
+  grammar never reports a rule the fallback does not
+  (`TestParser_NeverAddsFindingTheFallbackDoesNot`). Opting into a real parser
+  should only remove findings, which is the direction the docs promise. It is
+  an invariant over a corpus rather than a proof — all four bugs above are the
+  same shape, and only one of them had been noticed.
+
+### Changed
+
+- **`StmtInsert` now covers `REPLACE` and `UPSERT`**, which reaches
+  `sqlguard explain`: both were previously refused as unrecognized statements
+  and are now admitted under `--allow-dml`, planned and rolled back like any
+  other DML. On a server where the keyword is not valid, the server's syntax
+  error replaces sqlguard's refusal.
+- **`insert-without-columns` message reworded** from "INSERT without explicit
+  column list" to "Row-inserting statement without an explicit column list",
+  since it no longer fires only on `INSERT`.
+
+[#68]: https://github.com/KARTIKrocks/sqlguard/issues/68
+
 ## [0.4.0] - 2026-09-25
 
 ### Changed

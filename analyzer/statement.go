@@ -8,7 +8,12 @@ const (
 	StmtUnknown StmtKind = iota
 	// StmtSelect is a SELECT (or WITH ... SELECT) query.
 	StmtSelect
-	// StmtInsert is an INSERT statement.
+	// StmtInsert is an INSERT statement, or one of the dialect keywords that
+	// inserts rows the same way: MySQL/SQLite's REPLACE and the UPSERT the
+	// CockroachDB-derived grammar behind pgparser accepts. They bind values by
+	// column order exactly as INSERT does, so every rule that targets INSERT
+	// targets them. Note this also makes them DML to explain.validate, which
+	// accepts them under WithAllowDML rather than refusing them as unrecognized.
 	StmtInsert
 	// StmtUpdate is an UPDATE statement.
 	StmtUpdate
@@ -60,8 +65,13 @@ type Statement struct {
 	SelectDistinct bool
 
 	// InsertColumnsListed reports whether an INSERT names its target columns
-	// explicitly: INSERT INTO t (a, b) VALUES (...). Only meaningful when
-	// Kind == StmtInsert.
+	// explicitly, or has no columns to name. The second case is what keeps
+	// PostgreSQL's INSERT INTO t DEFAULT VALUES and MySQL's
+	// INSERT INTO t SET col = ... out of insert-without-columns: neither binds
+	// caller-supplied values by position, so no schema change can shift them.
+	// A parser filling this from an AST must account for both — reading it as
+	// "the column list is non-empty" alone reports DEFAULT VALUES.
+	// Only meaningful when Kind == StmtInsert.
 	InsertColumnsListed bool
 
 	// LeadingWildcardLike reports a LIKE pattern beginning with a wildcard
