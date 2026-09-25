@@ -76,14 +76,21 @@ The first group is the false-positive-prone set; those become exact
 regardless of the parser, and each field's doc comment says so. This is a
 documented carve-out, not a gap waiting to be closed.
 
-**A dialect parser only ever removes findings** — _0.5+_. Opting in can
-drop a finding the heuristics guessed wrong, but it never reports one the
-fallback would not have. Each parser module pins this against a corpus
+**A dialect parser is meant to remove findings, never add them** — _0.5+_.
+Opting in can drop a finding the heuristics guessed wrong; it should not
+report one the fallback would not have. Each parser module pins this
+direction against a corpus
 (`TestParser_NeverAddsFindingTheFallbackDoesNot`), so a rule that reads a
 structural field the grammar fills differently from the fallback fails
-there rather than reaching you. Before 0.4, `pgparser` reported
-`insert-without-columns` on `INSERT INTO t DEFAULT VALUES`, which the
-fallback correctly ignores.
+there rather than reaching you. That is a tested invariant over a corpus,
+not a proof: a dialect form neither the corpus nor the fallback's keyword
+list knows is how it would break again.
+
+In 0.4 and earlier it did break, twice in the same rule. `pgparser`
+reported `insert-without-columns` on `INSERT INTO t DEFAULT VALUES`, and
+both grammars reported it on row-inserting keywords the fallback did not
+recognize as inserts at all — `REPLACE`, `UPSERT`, and the `INTO`-less
+`INSERT t VALUES (…)` MySQL accepts.
 
 ## Degradation on parse failure
 

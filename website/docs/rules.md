@@ -175,8 +175,11 @@ Same as above for `UPDATE`.
 
 `INSERT INTO t VALUES (…)` and `INSERT INTO t SELECT …` bind positionally
 to the table's column order. Adding, dropping or reordering a column
-silently shifts every value. MySQL/SQLite's `REPLACE INTO t VALUES (…)`
-binds the same way and is flagged too — _0.5+_.
+silently shifts every value.
+
+Every keyword that inserts rows this way is flagged, not just `INSERT` —
+MySQL/SQLite's `REPLACE`, the `UPSERT` CockroachDB accepts, and the forms
+that omit the optional `INTO` (`INSERT t VALUES (…)`) — _0.5+_.
 
 Forms that name their columns, or have none to name, are not flagged:
 MySQL's `INSERT INTO t SET col = …`, and PostgreSQL's

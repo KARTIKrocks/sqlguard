@@ -19,13 +19,17 @@ the same version in lockstep.
   marked the result `Exact`. Opting into the exact parser made this rule
   strictly worse than the zero-dependency default, inverting the trade-off
   documented in [SQL Parsers](https://kartikrocks.github.io/sqlguard/docs/parsers).
-- **`REPLACE INTO t VALUES (…)` is now flagged by `insert-without-columns`.**
-  MySQL/SQLite's `REPLACE` binds positionally exactly as `INSERT` does and
-  carries the same column-order risk, and a real MySQL grammar parses it into
-  the same AST node — so `mysqlparser` already reported it while the
-  zero-dependency fallback read it as an unrecognized statement kind and said
-  nothing. `REPLACE INTO t (a) VALUES (…)` is not flagged, and the
-  `REPLACE(str, from, to)` string function is never mistaken for a statement.
+- **`insert-without-columns` now covers every keyword that inserts rows
+  positionally**, not just `INSERT INTO`: MySQL/SQLite's `REPLACE`, the
+  `UPSERT` the CockroachDB-derived grammar behind `pgparser` accepts, and the
+  forms that omit MySQL's optional `INTO` (`INSERT t VALUES (…)`,
+  `REPLACE t VALUES (…)`), including a `LOW_PRIORITY`/`DELAYED`/`IGNORE`
+  modifier run. All bind by column order and carry the same schema-change
+  risk, and all are the same AST node to a real grammar — so the dialect
+  parsers already reported them while the fallback read them as an
+  unrecognized statement kind and said nothing. `REPLACE(str, from, to)` is
+  never mistaken for a statement, and a `REPLACE()` call inside a CTE does not
+  displace the real statement head.
 
 ### Added
 
@@ -33,8 +37,20 @@ the same version in lockstep.
   a corpus through both the dialect grammar and the fallback and assert the
   grammar never reports a rule the fallback does not
   (`TestParser_NeverAddsFindingTheFallbackDoesNot`). Opting into a real parser
-  can only remove findings, which is the direction the docs promise; both bugs
-  above are instances of the same shape, and only one had been noticed.
+  should only remove findings, which is the direction the docs promise. It is
+  an invariant over a corpus rather than a proof — all four bugs above are the
+  same shape, and only one of them had been noticed.
+
+### Changed
+
+- **`StmtInsert` now covers `REPLACE` and `UPSERT`**, which reaches
+  `sqlguard explain`: both were previously refused as unrecognized statements
+  and are now admitted under `--allow-dml`, planned and rolled back like any
+  other DML. On a server where the keyword is not valid, the server's syntax
+  error replaces sqlguard's refusal.
+- **`insert-without-columns` message reworded** from "INSERT without explicit
+  column list" to "Row-inserting statement without an explicit column list",
+  since it no longer fires only on `INSERT`.
 
 [#68]: https://github.com/KARTIKrocks/sqlguard/issues/68
 

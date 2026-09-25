@@ -1,6 +1,7 @@
 package pgparser
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/KARTIKrocks/sqlguard/analyzer"
@@ -150,11 +151,24 @@ func TestParser_IntegratesWithAnalyzer(t *testing.T) {
 // grammar understands but the rules were never taught about is the shape that
 // breaks it — INSERT ... DEFAULT VALUES did, by refilling
 // InsertColumnsListed from len(Columns) alone after blanking it (#68).
+//
+// Some rows below need matching support in the core's fallback parser; see
+// fallbackKnowsInsertLikeKeywords for why they are skipped against an older
+// core rather than failing.
 func TestParser_NeverAddsFindingTheFallbackDoesNot(t *testing.T) {
 	// Fallback-only findings are expected and allowed: they are the false
 	// positives the grammar exists to drop.
 	corpus := []string{
 		"INSERT INTO t DEFAULT VALUES",
+		"INSERT INTO t DEFAULT VALUES RETURNING id",
+		// UPSERT is accepted by the CockroachDB-derived grammar behind this
+		// parser, so it reaches the INSERT node while a keyword-list heuristic
+		// would not recognize the statement at all.
+		"UPSERT INTO t VALUES (1)",
+		"UPSERT INTO t (a) VALUES (1)",
+		"INSERT INTO t VALUES (1) RETURNING id",
+		"INSERT INTO t (a) VALUES (1) ON CONFLICT (a) DO NOTHING",
+		"SELECT replace(name, 'a', 'b') FROM t",
 		"INSERT INTO t (a, b) VALUES (1, 2)",
 		"INSERT INTO t VALUES (1, 2)",
 		"INSERT INTO t (a) SELECT x FROM u",
@@ -192,17 +206,32 @@ func TestParser_NeverAddsFindingTheFallbackDoesNot(t *testing.T) {
 
 	fallback := analyzer.Default()
 	exact := analyzer.Default().WithParser(New())
+	coreKnows := fallbackKnowsInsertLikeKeywords()
 
 	for _, sql := range corpus {
 		t.Run(sql, func(t *testing.T) {
+			if !coreKnows && needsCoreKeywordSupport(sql) {
+				t.Skip("linked core predates the fallback's row-inserting keyword support")
+			}
 			base := ruleSet(fallback.Analyze(sql))
 			for name := range ruleSet(exact.Analyze(sql)) {
 				if _, ok := base[name]; !ok {
-					t.Errorf("pgparser reports %q, the fallback does not", name)
+					t.Errorf("%s reports %q, the fallback does not", "pgparser", name)
 				}
 			}
 		})
 	}
+}
+
+// needsCoreKeywordSupport reports whether a corpus entry's parity depends on
+// the core recognizing a row-inserting keyword other than "INSERT INTO".
+func needsCoreKeywordSupport(sql string) bool {
+	up := strings.ToUpper(strings.TrimSpace(sql))
+	if strings.HasPrefix(up, "INSERT INTO ") {
+		return false
+	}
+	return strings.HasPrefix(up, "REPLACE") || strings.HasPrefix(up, "UPSERT") ||
+		strings.HasPrefix(up, "INSERT")
 }
 
 func ruleSet(rs []analyzer.Result) map[string]struct{} {
@@ -211,4 +240,17 @@ func ruleSet(rs []analyzer.Result) map[string]struct{} {
 		out[r.RuleName] = struct{}{}
 	}
 	return out
+}
+
+// fallbackKnowsInsertLikeKeywords reports whether the linked core recognizes
+// the row-inserting keywords that are not spelled INSERT. That support and
+// this test ship in the same release, but this is a separate module: under
+// GOWORK=off it builds against the core its go.mod requires, which until the
+// next lockstep tag predates the support. Parity against an older core is a
+// version skew rather than a parity bug, so the rows that depend on it are
+// skipped there instead of failing. go.work (local dev and CI) always builds
+// against this tree, where they run.
+func fallbackKnowsInsertLikeKeywords() bool {
+	st, _ := analyzer.NewFallbackParser().Parse("REPLACE INTO t VALUES (1)")
+	return st.Kind == analyzer.StmtInsert
 }

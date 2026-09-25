@@ -110,7 +110,7 @@ func CheckInsertWithoutColumns(s *Statement) (Result, bool) {
 		return Result{
 			RuleName:   "insert-without-columns",
 			Query:      s.Raw,
-			Message:    "INSERT without explicit column list. This breaks if table schema changes.",
+			Message:    "Row-inserting statement without an explicit column list. This breaks if table schema changes.",
 			Suggestion: "Specify columns explicitly: INSERT INTO table (col1, col2) VALUES (...).",
 		}, true
 	}

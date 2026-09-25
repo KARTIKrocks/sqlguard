@@ -37,14 +37,25 @@ var (
 	// singular VALUE; SELECT/WITH/TABLE cover INSERT ... SELECT and friends.
 	fbInsertDataRe = regexp.MustCompile(`(?i)\b(VALUES?|SELECT|WITH|TABLE|SET|DEFAULT)\b`)
 	fbLeadKindRe   = regexp.MustCompile(`(?i)^\s*\(*\s*(SELECT|INSERT|UPDATE|DELETE|WITH)\b`)
-	// fbReplaceIntoRe recognizes MySQL/SQLite's REPLACE, which carries the same
-	// positional column-order risk as INSERT and is the same AST node to a real
-	// MySQL grammar. INTO is required here although the dialects make it
-	// optional: it disambiguates the statement from the REPLACE(str, a, b)
-	// function, and the INTO-less form is one insertColumnsListed already
-	// declines to flag (it looks for the span after INTO).
-	fbReplaceIntoRe = regexp.MustCompile(`(?i)^\s*\(*\s*REPLACE\s+INTO\b`)
-	fbDMLWordRe     = regexp.MustCompile(`(?i)\b(INSERT|UPDATE|DELETE)\b`)
+	// fbInsertModRe is the optional modifier run MySQL allows between the
+	// statement keyword and the target table.
+	fbInsertModRe = `(?:\s+(?:LOW_PRIORITY|DELAYED|HIGH_PRIORITY|IGNORE))*`
+	// fbLeadInsertLikeRe recognizes the statement keywords that are an INSERT
+	// positionally without being spelled INSERT: MySQL/SQLite's REPLACE and the
+	// UPSERT accepted by the CockroachDB-derived grammar behind pgparser. Both
+	// bind by column order and carry the same schema-change risk, and both are
+	// the same AST node to the real grammars — so leaving them as StmtOther
+	// here means the rule fires only for callers who opted into a parser.
+	// INTO is optional (MySQL's is), but a table name must follow, which is
+	// what separates the statement from the REPLACE(str, from, to) function.
+	fbLeadInsertLikeRe = regexp.MustCompile(`(?i)^\s*\(*\s*(?:REPLACE|UPSERT)` + fbInsertModRe + `\s+(?:INTO\s+)?[^\s(]`)
+	// fbInsertHeadRe spans the statement keyword and its modifiers, used to
+	// find the target table when the optional INTO is absent. Anchored at the
+	// start, unlike fbIntoRe: without that anchor the keyword could be matched
+	// inside a CTE body (a REPLACE() call in a WITH clause), and the INTO-less
+	// forms are MySQL-only, where the CTE-prefixed shape needs INTO anyway.
+	fbInsertHeadRe = regexp.MustCompile(`(?i)^\s*\(*\s*(?:INSERT|REPLACE|UPSERT)` + fbInsertModRe + `\b`)
+	fbDMLWordRe    = regexp.MustCompile(`(?i)\b(INSERT|UPDATE|DELETE)\b`)
 
 	// fbWhereRegionEndRe marks the first clause keyword that ends the WHERE
 	// region, so a function in ORDER BY / GROUP BY / HAVING isn't read as a
@@ -149,11 +160,20 @@ func (p *FallbackParser) Parse(sql string) (*Statement, error) {
 // both count as listed (no positional column-order risk to warn about).
 // Comment-free, literal-blanked input expected; heuristic by contract.
 func insertColumnsListed(sanitized string) bool {
-	loc := fbIntoRe.FindStringIndex(sanitized)
-	if loc == nil {
-		return true // no INTO found — can't tell, don't flag
+	// INTO is the tightest anchor and the only one that survives a CTE prefix,
+	// where the statement keyword itself can appear inside the CTE body. Fall
+	// back to the statement head for the forms that omit it.
+	var rest string
+	switch loc := fbIntoRe.FindStringIndex(sanitized); {
+	case loc != nil:
+		rest = sanitized[loc[1]:]
+	default:
+		head := fbInsertHeadRe.FindStringIndex(sanitized)
+		if head == nil {
+			return true // no recognizable statement head — can't tell, don't flag
+		}
+		rest = sanitized[head[1]:]
 	}
-	rest := sanitized[loc[1]:]
 	data := fbInsertDataRe.FindStringIndex(rest)
 	if data == nil {
 		return true // no recognizable data clause — don't flag
@@ -455,7 +475,7 @@ func parenDepthBefore(s string, idx int) int {
 func detectKind(sanitized string) StmtKind {
 	m := fbLeadKindRe.FindStringSubmatch(sanitized)
 	if m == nil {
-		if fbReplaceIntoRe.MatchString(sanitized) {
+		if fbLeadInsertLikeRe.MatchString(sanitized) {
 			return StmtInsert
 		}
 		return StmtOther

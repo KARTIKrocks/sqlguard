@@ -125,8 +125,21 @@ func TestCheckInsertWithoutColumns(t *testing.T) {
 		// made the rule fire only for callers who opted into mysqlparser.
 		{"replace no columns", "REPLACE INTO users VALUES ('alice')", true},
 		{"replace with columns", "REPLACE INTO users (name) VALUES ('alice')", false},
+		// INTO is optional in MySQL for both keywords, and a modifier run may
+		// sit between the keyword and the table.
+		{"replace without into", "REPLACE users VALUES ('alice')", true},
+		{"replace without into with columns", "REPLACE users (name) VALUES ('alice')", false},
+		{"insert without into", "INSERT users VALUES ('alice')", true},
+		{"insert without into with columns", "INSERT users (name) VALUES ('alice')", false},
+		{"insert with modifier", "INSERT LOW_PRIORITY INTO users VALUES ('alice')", true},
+		{"replace delayed without into", "REPLACE DELAYED users VALUES ('alice')", true},
+		// UPSERT reaches the INSERT node in the grammar behind pgparser.
+		{"upsert no columns", "UPSERT INTO users VALUES ('alice')", true},
+		{"upsert with columns", "UPSERT INTO users (name) VALUES ('alice')", false},
 		// REPLACE(str, from, to) is a string function, not a statement.
 		{"replace function is not a statement", "SELECT REPLACE(name, 'a', 'b') FROM users", false},
+		{"replace function inside an insert", "INSERT INTO users (name) VALUES (REPLACE(x, 'a', 'b'))", false},
+		{"cte containing a replace call", "WITH s AS (SELECT REPLACE(a, 'x', 'y') AS n FROM u) INSERT INTO users SELECT n FROM s", true},
 	}
 
 	for _, tt := range tests {
