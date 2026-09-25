@@ -9,18 +9,6 @@ the same version in lockstep.
 
 ## [Unreleased]
 
-## [0.3.0] - 2026-09-25
-
-### Added
-
-- **Documentation site** at <https://kartikrocks.github.io/sqlguard/>, built
-  with Docusaurus from `website/` and deployed from `main` by
-  `.github/workflows/docs.yml`. Docs are versioned by snapshot (`0.2` is the
-  first); see `website/VERSIONING.md`. `make lint-docs` lints every Markdown
-  file in the repo (`.markdownlint-cli2.jsonc`) and is part of `make ci` and
-  the CI workflow.
-- Project logo, favicon and social card under `website/static/img/`.
-
 ### Changed
 
 - **Every documented rule is now addressable in `.sqlguard.yml`.** The rules
@@ -74,6 +62,20 @@ the same version in lockstep.
   typo in `only:` acted as a whitelist matching nothing, which since every
   rule became addressable would have silenced the runtime and plan findings
   as well as the static scan.
+
+## [0.3.0] - 2026-09-25
+
+### Added
+
+- **Documentation site** at <https://kartikrocks.github.io/sqlguard/>, built
+  with Docusaurus from `website/` and deployed from `main` by
+  `.github/workflows/docs.yml`. Docs are versioned by snapshot (`0.2` is the
+  first); see `website/VERSIONING.md`. `make lint-docs` lints every Markdown
+  file in the repo (`.markdownlint-cli2.jsonc`) and is part of `make ci` and
+  the CI workflow.
+- Project logo, favicon and social card under `website/static/img/`.
+
+### Changed
 
 - README restructured as a landing page: logo, "Why sqlguard?" comparison,
   quick start, and a guide index pointing at the docs site. The deep
