@@ -91,3 +91,46 @@ func TestOnlyDoesNotSilenceRuntimeFindings(t *testing.T) {
 type reporterFunc func([]analyzer.Result)
 
 func (f reporterFunc) Report(rs []analyzer.Result) { f(rs) }
+
+// TestRejectedSettingDoesNotReachTheReader is the half the earlier fix missed.
+// Rejecting a value under `strict: true` is the easy case — the load stops. In
+// lenient mode, which is the default, the load continues, so a warning is only
+// half an answer: `slow-query.threshold: 0` warned and then matched every
+// successful query anyway, flooding the reporter it was meant to protect.
+func TestRejectedSettingDoesNotReachTheReader(t *testing.T) {
+	c := &Config{Rules: RulesConfig{Settings: map[string]map[string]any{
+		"slow-query": {"threshold": 0},
+	}}}
+
+	p, err := c.Profile()
+	if err != nil {
+		t.Fatalf("lenient mode should not fail: %v", err)
+	}
+	if len(c.Warnings()) == 0 {
+		t.Error("expected a warning for the zero threshold")
+	}
+	if _, present := p.Settings["slow-query"]["threshold"]; present {
+		t.Errorf("the rejected value reached the profile: %v", p.Settings["slow-query"])
+	}
+
+	opts, err := c.MiddlewareOptions()
+	if err != nil {
+		t.Fatalf("MiddlewareOptions: %v", err)
+	}
+	var got []analyzer.Result
+	opts = append(opts, middleware.WithReporter(
+		reporterFunc(func(rs []analyzer.Result) { got = append(got, rs...) })))
+	g := middleware.NewGuard(opts...)
+
+	g.CheckLatency("SELECT id FROM t WHERE id = ?", time.Microsecond)
+
+	if len(got) != 0 {
+		t.Errorf("a 1µs query was reported slow, so the threshold fell to 0: %+v", got)
+	}
+
+	// The built-in default must be what stands in its place.
+	g.CheckLatency("SELECT id FROM t WHERE id = ?", 300*time.Millisecond)
+	if len(got) != 1 {
+		t.Errorf("300ms should exceed the built-in 200ms default, got %+v", got)
+	}
+}

@@ -37,7 +37,12 @@ rules:
   disable:
     - orderby-without-limit
 
-  # Whitelist mode: when non-empty, ONLY these rules run (disable is ignored).
+  # Whitelist mode: when non-empty, a rule must be listed to run. It narrows
+  # the rules evaluated against a statement — the scanner and the runtime
+  # statement rules — and does NOT reach slow-query, n-plus-one or the EXPLAIN
+  # plan rules; switch one of those off by naming it in `disable` above.
+  # `disable` still applies to the rules listed here, so listing and disabling
+  # the same rule disables it.
   # only:
   #   - delete-without-where
   #   - update-without-where

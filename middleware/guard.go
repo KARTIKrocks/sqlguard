@@ -28,8 +28,12 @@ type Guard struct {
 }
 
 // findingPolicy is a registered rule's resolved state for a finding the
-// analyzer does not evaluate itself. `enabled` folds in `disable` and `only`;
-// `severity` folds in a profile override.
+// analyzer does not evaluate itself.
+//
+// `enabled` answers `disable:` and `severity: off` only — `only:` selects the
+// rules evaluated against a statement, and these are not among them (see
+// analyzer.RuleEnabled). `severity` folds in a profile override. Settings
+// reach these rules too, through Profile.Settings.
 type findingPolicy struct {
 	enabled  bool
 	severity analyzer.Severity

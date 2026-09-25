@@ -47,7 +47,11 @@ the same version in lockstep.
   previously reachable only from Go via `WithN1Detection`, which still takes
   precedence.
 - A value in `rules.settings` that will not read back as its type is now
-  reported instead of being silently replaced by the built-in default. This
+  reported **and dropped**, so the rule falls back to its built-in default
+  rather than acting on the rejected value. In lenient mode the load continues
+  after a warning, so reporting alone was half an answer:
+  `slow-query.threshold: 0` warned and then matched every successful query
+  anyway, flooding the reporter it exists to protect. This
   covers durations and numbers, and a half-specified `n-plus-one` block —
   a quoted `threshold: "10"` is a string in YAML, read back as 0, which would
   have left N+1 detection off with no indication.

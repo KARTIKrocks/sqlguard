@@ -166,6 +166,44 @@ for _, issue := range res.Issues {                 // []analyzer.Result
 fmt.Println(res.RawPlan)                           // the plan text, for humans
 ```
 
+_Added in 0.3._ `explain.WithAnalyzer` applies a rule profile, which is how the
+CLI passes your `.sqlguard.yml` through. From code you can build one without a
+file:
+
+```go
+import (
+    "github.com/KARTIKrocks/sqlguard/analyzer"
+    "github.com/KARTIKrocks/sqlguard/explain"
+)
+
+a := analyzer.DefaultWithProfile(analyzer.Profile{
+    Disabled: map[string]bool{"high-cost": true},
+    Severity: map[string]analyzer.Severity{"seq-scan": analyzer.SeverityCritical},
+})
+
+pa, err := explain.New(db, "postgres", explain.WithAnalyzer(a))
+if err != nil {
+    return err
+}
+```
+
+Or from a loaded config, so the same file governs the scanner, the middleware
+and this:
+
+```go
+cfg, err := config.Load(".sqlguard.yml")
+if err != nil {
+    return err
+}
+a, err := cfg.Analyzer()
+if err != nil {
+    return err
+}
+pa, err := explain.New(db, "postgres", explain.WithAnalyzer(a))
+```
+
+Without it, every plan rule fires at its built-in severity.
+
 `explain.Result` carries `Query`, `RawPlan` and `Issues`. Pair it with a
 test that runs your hottest queries through `Analyze` against a seeded
 database — a `seq-scan` on the orders table is cheaper to find in CI than

@@ -217,10 +217,13 @@ func (c *Config) Profile() (analyzer.Profile, error) {
 		if !ok {
 			continue
 		}
-		if err := checkSettings(name, kv, warn); err != nil {
+		kept, err := checkSettings(name, kv, warn)
+		if err != nil {
 			return p, err
 		}
-		p.Settings[name] = analyzer.Settings(kv)
+		if len(kept) > 0 {
+			p.Settings[name] = kept
+		}
 	}
 	return p, nil
 }
@@ -351,49 +354,66 @@ var pairedSettings = map[string][]string{
 }
 
 // checkSettings reports a setting key the rule does not have, a value that
-// will not read back as its kind, and a half-specified pair.
-func checkSettings(rule string, kv map[string]any, warn func(string, ...any) error) error {
+// will not read back as its kind, and a half-specified pair. It returns the
+// settings that survived.
+//
+// Returning a subset is the point: in lenient mode a warning does not stop the
+// load, and carrying a rejected value through to the profile would mean the
+// reader still acts on it. `slow-query.threshold: 0` warned and then matched
+// every query anyway, flooding the reporter — the warning named the problem
+// while the problem still happened. A value this reports is a value the rules
+// must not see.
+func checkSettings(rule string, kv map[string]any, warn func(string, ...any) error) (analyzer.Settings, error) {
 	kinds, tunable := ruleSettings[rule]
+	kept := make(analyzer.Settings, len(kv))
 	for key, v := range kv {
 		kind, known := kinds[key]
 		if !known {
 			if !tunable {
 				if err := warn("rule %q has no settings, so %q is ignored", rule, key); err != nil {
-					return err
+					return nil, err
 				}
 				continue
 			}
 			if err := warn("rule %q: unknown setting %q (known: %s)",
 				rule, key, strings.Join(sortedKeys(kinds), ", ")); err != nil {
-				return err
+				return nil, err
 			}
 			continue
 		}
-		if err := checkSettingValue(rule, key, kind, v, warn); err != nil {
-			return err
+		bad, err := checkSettingValue(rule, key, kind, v, warn)
+		if err != nil {
+			return nil, err
+		}
+		if !bad {
+			kept[key] = v
 		}
 	}
 
 	pair := pairedSettings[rule]
 	if len(pair) == 0 {
-		return nil
+		return kept, nil
 	}
+	// Judged on what survived: a pair whose other half was rejected is just as
+	// inert as one whose other half was never written.
 	var have, missing []string
 	for _, key := range pair {
-		if _, present := kv[key]; present {
+		if _, present := kept[key]; present {
 			have = append(have, key)
 		} else {
 			missing = append(missing, key)
 		}
 	}
 	if len(have) > 0 && len(missing) > 0 {
-		return warn("rule %q: setting %q has no effect without %q",
+		return kept, warn("rule %q: setting %q has no effect without %q",
 			rule, strings.Join(have, ", "), strings.Join(missing, ", "))
 	}
-	return nil
+	return kept, nil
 }
 
-func checkSettingValue(rule, key string, kind settingKind, v any, warn func(string, ...any) error) error {
+// checkSettingValue reports a value the reader cannot use. bad is true when
+// the value was rejected, so the caller can keep it out of the profile.
+func checkSettingValue(rule, key string, kind settingKind, v any, warn func(string, ...any) error) (bad bool, err error) {
 	// Validate through the same accessors the rules read with, so a value
 	// accepted here can never be one the reader quietly replaces with its
 	// default. A second copy of these parsing rules is exactly how the two
@@ -406,10 +426,10 @@ func checkSettingValue(rule, key string, kind settingKind, v any, warn func(stri
 		if !ok {
 			// A bool, a list or a map reads back as the default, which for
 			// n-plus-one.window means detection silently never switches on.
-			return warn("rule %q: setting %q: expected a duration or a number, got %v", rule, key, v)
+			return true, warn("rule %q: setting %q: expected a duration or a number, got %v", rule, key, v)
 		}
 		if kind == settingPositiveDuration && d <= 0 {
-			return warn("rule %q: setting %q must be greater than 0, got %v", rule, key, v)
+			return true, warn("rule %q: setting %q must be greater than 0, got %v", rule, key, v)
 		}
 	case settingInt, settingPositiveInt:
 		n, ok := one.LookupInt(key)
@@ -417,14 +437,14 @@ func checkSettingValue(rule, key string, kind settingKind, v any, warn func(stri
 			// A quoted number is the common YAML slip. Settings.Int does not
 			// accept a string, so it would read back as the default: for
 			// n-plus-one.threshold that means detection never switches on.
-			return warn("rule %q: setting %q: expected a number, got %v (quoted numbers are strings in YAML)",
+			return true, warn("rule %q: setting %q: expected a number, got %v (quoted numbers are strings in YAML)",
 				rule, key, v)
 		}
 		if kind == settingPositiveInt && n <= 0 {
-			return warn("rule %q: setting %q must be greater than 0, got %d", rule, key, n)
+			return true, warn("rule %q: setting %q must be greater than 0, got %d", rule, key, n)
 		}
 	}
-	return nil
+	return false, nil
 }
 
 func sortedKeys(m map[string]settingKind) []string {

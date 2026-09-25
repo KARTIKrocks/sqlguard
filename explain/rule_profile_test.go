@@ -109,12 +109,14 @@ func TestApplyProfile_SeverityOffDisables(t *testing.T) {
 	}
 }
 
-// TestPlanSeverity_EscalationOnlyGoesUp guards against inverting the registry
-// default. analyzer.Register can replace a built-in by name, so if seq-scan
-// were registered above WARNING, assigning the literal outright would report
-// the wide scan as *less* severe than the narrow one.
-func TestPlanSeverity_EscalationOnlyGoesUp(t *testing.T) {
-	// Restore the built-in registration however this test exits.
+// TestSeqScanSeverity_EscalationOnlyGoesUp drives walkPgPlan, the code that
+// actually builds the finding. Asserting on a locally computed max would only
+// exercise the builtin: it could not fail, and would keep passing if
+// walkPgPlan went back to assigning SeverityWarning outright.
+//
+// analyzer.Register can replace a built-in by name, so a seq-scan registered
+// above WARNING must not be *lowered* by the wide-scan branch.
+func TestSeqScanSeverity_EscalationOnlyGoesUp(t *testing.T) {
 	orig, ok := analyzer.RuleDefaultSeverity("seq-scan")
 	if !ok {
 		t.Fatal("seq-scan is not registered")
@@ -122,17 +124,53 @@ func TestPlanSeverity_EscalationOnlyGoesUp(t *testing.T) {
 	t.Cleanup(func() {
 		analyzer.Register(analyzer.RuleSpec{Name: "seq-scan", DefaultSeverity: orig})
 	})
-
 	analyzer.Register(analyzer.RuleSpec{Name: "seq-scan", DefaultSeverity: analyzer.SeverityCritical})
 
-	base := planSeverity("seq-scan")
-	if base != analyzer.SeverityCritical {
-		t.Fatalf("planSeverity did not pick up the re-registration: %v", base)
-	}
+	pa := &PlanAnalyzer{}
 
-	// The escalation branch must not lower it.
-	wide := max(base, analyzer.SeverityWarning)
-	if wide < base {
-		t.Errorf("a wide scan reported %v, below the registered %v", wide, base)
+	for _, tc := range []struct {
+		name string
+		rows int64
+	}{
+		{"narrow scan reports the registered severity", 10},
+		{"wide scan must not drop below it", 500_000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var issues []analyzer.Result
+			pa.walkPgPlan(&pgPlanNode{NodeType: "Seq Scan", PlanRows: tc.rows}, "SELECT 1", &issues)
+
+			var seq *analyzer.Result
+			for i := range issues {
+				if issues[i].RuleName == "seq-scan" {
+					seq = &issues[i]
+				}
+			}
+			if seq == nil {
+				t.Fatalf("no seq-scan finding for a Seq Scan node: %+v", issues)
+			}
+			if seq.Severity < analyzer.SeverityCritical {
+				t.Errorf("reported %v, below the registered CRITICAL", seq.Severity)
+			}
+		})
+	}
+}
+
+// TestSeqScanSeverity_EscalatesFromTheRegisteredDefault is the other
+// direction: at the built-in INFO, a wide scan must still be raised.
+func TestSeqScanSeverity_EscalatesFromTheRegisteredDefault(t *testing.T) {
+	pa := &PlanAnalyzer{}
+
+	var narrow, wide []analyzer.Result
+	pa.walkPgPlan(&pgPlanNode{NodeType: "Seq Scan", PlanRows: 10}, "SELECT 1", &narrow)
+	pa.walkPgPlan(&pgPlanNode{NodeType: "Seq Scan", PlanRows: 500_000}, "SELECT 1", &wide)
+
+	if len(narrow) == 0 || len(wide) == 0 {
+		t.Fatalf("expected a finding from each: narrow=%+v wide=%+v", narrow, wide)
+	}
+	if narrow[0].Severity != analyzer.SeverityInfo {
+		t.Errorf("narrow scan = %v, want the registered INFO", narrow[0].Severity)
+	}
+	if wide[0].Severity != analyzer.SeverityWarning {
+		t.Errorf("wide scan = %v, want WARNING", wide[0].Severity)
 	}
 }

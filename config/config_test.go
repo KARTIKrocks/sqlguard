@@ -242,8 +242,10 @@ func TestProfile_ValidatesSettings(t *testing.T) {
 	}{
 		{"unparseable duration", map[string]map[string]any{
 			"slow-query": {"threshold": "200mss"}}, 1},
+		// Two warnings, both true: the quoted threshold is rejected, and the
+		// window that survives alone no longer switches anything on.
 		{"quoted number reads back as the default", map[string]map[string]any{
-			"n-plus-one": {"threshold": "10", "window": "1m"}}, 1},
+			"n-plus-one": {"threshold": "10", "window": "1m"}}, 2},
 		{"half a paired block is inert", map[string]map[string]any{
 			"n-plus-one": {"window": "1m"}}, 1},
 		{"quoted int on a statement rule", map[string]map[string]any{
