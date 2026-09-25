@@ -3,7 +3,7 @@ module github.com/KARTIKrocks/sqlguard/integrations/pgxguard
 go 1.27
 
 require (
-	github.com/KARTIKrocks/sqlguard v0.3.0
+	github.com/KARTIKrocks/sqlguard v0.4.0
 	github.com/jackc/pgx/v5 v5.11.0
 )
 
