@@ -11,6 +11,39 @@ the same version in lockstep.
 
 ### Fixed
 
+- **Every query is no longer analyzed twice when the base driver returns
+  `driver.ErrSkip`** ([#67]). `wConn.QueryContext`/`ExecContext` analyzed the
+  query before handing it to the base. A base with no direct `Queryer`/`Execer`
+  was covered, but not one that has the entry point and declines the call with
+  `driver.ErrSkip`: `database/sql` then falls back to Prepare+Query, which
+  re-enters through the wrapped statement and analyzes the same execution a
+  second time. `go-sql-driver/mysql` returns `ErrSkip` for every parameterized
+  query unless `interpolateParams=true`, which is off by default — so on MySQL
+  essentially all traffic was double-analyzed. **N+1 counts were doubled**,
+  halving the effective threshold (`WithN1Detection(10, …)` fired at 5 real
+  queries) and producing spurious N+1 reports; duplicate static findings were
+  masked by the default one-minute dedup window and only surfaced under
+  `WithFindingDedup(0)`. The base is now called first and analysis is skipped
+  when it answers `ErrSkip`, so the prepare path remains the single analysis
+  point. On this path findings are produced after execution rather than
+  before, which nothing consumes.
+- **A query retried after `driver.ErrBadConn` is no longer analyzed once per
+  attempt.** `database/sql` retries a failed query on another connection —
+  twice from the pool, then once on a fresh connection — and every attempt
+  re-entered the wrapper, so one logical query could be analyzed three times.
+  `ErrBadConn`'s contract is that a driver must not return it when the
+  operation may have been performed, so a declined attempt executed nothing
+  and is now skipped, at the connection and the statement level alike. This is
+  the same N+1 inflation as [#67] from the other per-call "did not run"
+  answer, and it surfaces whenever pooled connections go stale: MySQL's
+  `wait_timeout`, a server restart, a failover.
+- **A statement call rejected by argument conversion is no longer analyzed.**
+  `wStmt.ExecContext`/`QueryContext` ran the rules before converting named
+  parameters for a base that predates them, so a call that failed with
+  `sqlguard: driver does not support named parameters` — without ever
+  reaching the database — still produced findings and incremented the N+1
+  counter.
+
 - **`pgparser` no longer reports `insert-without-columns` on
   `INSERT INTO t DEFAULT VALUES`** ([#68]). The grammar encodes that form as
   an absent row source, and the parser refilled `InsertColumnsListed` from
@@ -61,6 +94,7 @@ the same version in lockstep.
   column list" to "Row-inserting statement without an explicit column list",
   since it no longer fires only on `INSERT`.
 
+[#67]: https://github.com/KARTIKrocks/sqlguard/issues/67
 [#68]: https://github.com/KARTIKrocks/sqlguard/issues/68
 
 ## [0.4.0] - 2026-09-25
