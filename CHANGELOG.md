@@ -19,9 +19,11 @@ the same version in lockstep.
   `CREATE VIEW v AS SELECT * FROM t`, `CREATE TABLE … AS SELECT *` and
   `EXPLAIN SELECT *` all lost `select-star`. Those statements now keep the
   fallback's `Statement` with `Exact == false`. Both parsers also read the
-  row source of `INSERT … SELECT *` now, and `mysqlparser` reads a `UNION`'s
-  `ORDER BY`/`LIMIT` as `pgparser` already did instead of treating it as
-  `StmtOther`.
+  row source of `INSERT … SELECT *` now, and read every operand of a
+  `UNION`/`INTERSECT`/`EXCEPT` instead of none of them, so
+  `SELECT * FROM t UNION SELECT * FROM u` reports `select-star` and
+  `select-without-limit` as the fallback does. `mysqlparser` had treated a
+  `UNION` as `StmtOther`.
 - **`pgparser` no longer treats a bare `OFFSET` as a `LIMIT`** ([#82]). The
   grammar builds a limit node for `OFFSET n` alone, and `HasLimit` was set
   from the node rather than from a row count, so `select-without-limit` and

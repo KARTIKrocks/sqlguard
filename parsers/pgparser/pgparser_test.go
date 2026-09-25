@@ -214,10 +214,13 @@ func TestParser_KeepsFindingsTheGrammarHasNoReasonToDrop(t *testing.T) {
 		sql  string
 		want []string
 	}{
-		{"CREATE VIEW v AS SELECT * FROM t", []string{"select-star"}},                                                         // #81
-		{"CREATE TABLE c AS SELECT * FROM t", []string{"select-star"}},                                                        // #81
-		{"EXPLAIN SELECT * FROM t", []string{"select-star"}},                                                                  // #81
-		{"INSERT INTO t (a) SELECT * FROM u", []string{"select-star"}},                                                        // #81
+		{"CREATE VIEW v AS SELECT * FROM t", []string{"select-star"}},  // #81
+		{"CREATE TABLE c AS SELECT * FROM t", []string{"select-star"}}, // #81
+		{"EXPLAIN SELECT * FROM t", []string{"select-star"}},           // #81
+		{"INSERT INTO t (a) SELECT * FROM u", []string{"select-star"}}, // #81
+		{"SELECT * FROM t UNION SELECT * FROM u", []string{"select-star", "select-without-limit"}},
+		{"SELECT a FROM t UNION SELECT b FROM u ORDER BY a", []string{"orderby-without-limit", "select-without-limit"}},
+		{"INSERT INTO t (a) SELECT * FROM u UNION SELECT * FROM v", []string{"select-star"}},
 		{"WITH c AS (SELECT 1 AS n) INSERT INTO t (a) SELECT * FROM c", []string{"select-star"}},                              // #81
 		{"SELECT a FROM t OFFSET 100", []string{"select-without-limit"}},                                                      // #82
 		{"SELECT a FROM t ORDER BY a OFFSET 5000", []string{"large-offset", "orderby-without-limit", "select-without-limit"}}, // #82
@@ -303,6 +306,9 @@ func TestParser_NeverAddsFindingTheFallbackDoesNot(t *testing.T) {
 		"(SELECT a FROM t ORDER BY a OFFSET 5)",
 		"(SELECT a FROM t ORDER BY a LIMIT 5)",
 		"SELECT a FROM t UNION SELECT b FROM u ORDER BY a",
+		"SELECT * FROM t UNION SELECT * FROM u",
+		"SELECT a FROM t WHERE x = 1 UNION SELECT b FROM u",
+		"INSERT INTO t (a) SELECT * FROM u UNION SELECT * FROM v",
 		"INSERT INTO t (a) SELECT * FROM u",
 		"WITH c AS (SELECT 1 AS n) INSERT INTO t (a) SELECT * FROM c",
 		"CREATE VIEW v AS SELECT * FROM t",

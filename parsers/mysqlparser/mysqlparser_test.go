@@ -116,16 +116,21 @@ func TestParser_ExactStructuralFacts(t *testing.T) {
 			want: analyzer.Statement{Kind: analyzer.StmtInsert, InsertColumnsListed: true, Exact: true},
 		},
 		{
-			// Set operations read like pgparser's: the ORDER BY / LIMIT that
-			// apply to the whole result, not the arms' own clauses.
+			// A set operation merges its operands' facts; only the ORDER BY
+			// that applies to the whole result counts.
 			name: "union with order by",
 			sql:  "SELECT a FROM t UNION SELECT b FROM u ORDER BY a",
-			want: analyzer.Statement{Kind: analyzer.StmtSelect, HasOrderBy: true, Exact: true},
+			want: analyzer.Statement{Kind: analyzer.StmtSelect, HasFrom: true, HasOrderBy: true, Exact: true},
 		},
 		{
 			name: "union with limit",
 			sql:  "SELECT a FROM t UNION SELECT b FROM u ORDER BY a LIMIT 10",
-			want: analyzer.Statement{Kind: analyzer.StmtSelect, HasOrderBy: true, HasLimit: true, Exact: true},
+			want: analyzer.Statement{Kind: analyzer.StmtSelect, HasFrom: true, HasOrderBy: true, HasLimit: true, Exact: true},
+		},
+		{
+			name: "union arm star",
+			sql:  "SELECT a FROM t UNION SELECT * FROM u",
+			want: analyzer.Statement{Kind: analyzer.StmtSelect, HasFrom: true, SelectStar: true, Exact: true},
 		},
 	}
 
@@ -217,6 +222,9 @@ func TestParser_KeepsFindingsTheGrammarHasNoReasonToDrop(t *testing.T) {
 		{"CREATE VIEW v AS SELECT * FROM t", []string{"select-star"}},
 		{"EXPLAIN SELECT * FROM t", []string{"select-star"}},
 		{"INSERT INTO t (a) SELECT * FROM u", []string{"select-star"}},
+		{"SELECT * FROM t UNION SELECT * FROM u", []string{"select-star", "select-without-limit"}},
+		{"SELECT a FROM t UNION SELECT b FROM u ORDER BY a", []string{"orderby-without-limit", "select-without-limit"}},
+		{"INSERT INTO t (a) SELECT * FROM u UNION SELECT * FROM v", []string{"select-star"}},
 		{"REPLACE INTO t (a) SELECT * FROM u", []string{"select-star"}},
 		{"SELECT a FROM t UNION SELECT b FROM u ORDER BY a", []string{"orderby-without-limit"}},
 	}
@@ -296,6 +304,9 @@ func TestParser_NeverAddsFindingTheFallbackDoesNot(t *testing.T) {
 		"(SELECT a FROM t) UNION (SELECT b FROM u)",
 		"SELECT a FROM t UNION SELECT b FROM u ORDER BY a",
 		"SELECT a FROM t UNION SELECT b FROM u ORDER BY a LIMIT 10",
+		"SELECT * FROM t UNION SELECT * FROM u",
+		"SELECT a FROM t WHERE x = 1 UNION SELECT b FROM u",
+		"INSERT INTO t (a) SELECT * FROM u UNION SELECT * FROM v",
 		"INSERT INTO t (a) SELECT * FROM u",
 		"REPLACE INTO t (a) SELECT * FROM u",
 		"CREATE VIEW v AS SELECT * FROM t",

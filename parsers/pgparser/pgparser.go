@@ -149,9 +149,35 @@ func fillSelectBody(st *analyzer.Statement, sel tree.SelectStatement) {
 			}
 			fillSelectBody(st, c.Select.Select)
 		}
+	case *tree.UnionClause:
+		mergeArm(st, c.Left)
+		mergeArm(st, c.Right)
 	}
-	// UnionClause / ValuesClause: leave structural defaults; the rules that
-	// matter for those forms don't trigger on set operations.
+	// ValuesClause: no FROM, WHERE or select list to read.
+}
+
+// mergeArm folds one operand of a set operation (UNION / INTERSECT / EXCEPT)
+// into st. Each fact is true when any arm has it, which is how the fallback
+// reads the same text: a star or a FROM in either arm is one in the statement,
+// and a WHERE or LIMIT in either arm counts too. The last two are generous —
+// one filtered arm does not bound the other — but reading them per-arm would
+// report select-without-limit where the fallback does not, and a parser may
+// only remove findings. An arm's ORDER BY is not merged: it orders that arm,
+// not the result.
+func mergeArm(st *analyzer.Statement, arm *tree.Select) {
+	if arm == nil {
+		return
+	}
+	var a analyzer.Statement
+	a.HasLimit = hasRowLimit(arm.Limit)
+	a.OffsetValue = offsetValue(arm.Limit)
+	fillSelectBody(&a, arm.Select)
+	st.HasWhere = st.HasWhere || a.HasWhere
+	st.HasFrom = st.HasFrom || a.HasFrom
+	st.HasLimit = st.HasLimit || a.HasLimit
+	st.SelectStar = st.SelectStar || a.SelectStar
+	st.SelectDistinct = st.SelectDistinct || a.SelectDistinct
+	st.OffsetValue = max(st.OffsetValue, a.OffsetValue)
 }
 
 // offsetValue extracts a literal OFFSET as an int, or 0 when there is no limit

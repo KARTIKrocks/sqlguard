@@ -110,6 +110,8 @@ both parsers dropped findings they had derived nothing about:
   whose structural fields were cleared rather than kept from the fallback.
 - `select-star` on `INSERT INTO t (a) SELECT * FROM u`, whose row source
   was never inspected.
+- `select-star` and `select-without-limit` on
+  `SELECT * FROM t UNION SELECT * FROM u`, whose operands were never read.
 - Under `pgparser`, `select-without-limit` and `orderby-without-limit` on a
   bare `OFFSET` with no `LIMIT`, which was read as a limit. `LIMIT ALL`
   still counts as one: it states that no limit is wanted.

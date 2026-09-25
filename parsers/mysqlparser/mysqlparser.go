@@ -60,21 +60,11 @@ func (p *Parser) Parse(sql string) (*analyzer.Statement, error) {
 	case *sqlparser.Select:
 		resetStructural(st)
 		st.Kind = analyzer.StmtSelect
-		st.HasWhere = n.Where != nil
-		st.HasLimit = hasRowLimit(n.Limit)
-		st.HasOrderBy = len(n.OrderBy) > 0
-		st.HasFrom = hasRealFrom(n.From)
-		st.SelectDistinct = n.Distinct != ""
-		st.OffsetValue = offsetValue(n.Limit)
-		st.SelectStar = hasStar(n.SelectExprs)
+		fillSelect(st, n, true)
 	case *sqlparser.Union:
-		// Same shape as pgparser's set operations: the ORDER BY / LIMIT that
-		// apply to the whole result are read, the arms' FROM/WHERE are not.
 		resetStructural(st)
 		st.Kind = analyzer.StmtSelect
-		st.HasLimit = hasRowLimit(n.Limit)
-		st.HasOrderBy = len(n.OrderBy) > 0
-		st.OffsetValue = offsetValue(n.Limit)
+		fillSelect(st, n, true)
 	case *sqlparser.Delete:
 		resetStructural(st)
 		st.Kind = analyzer.StmtDelete
@@ -95,7 +85,11 @@ func (p *Parser) Parse(sql string) (*analyzer.Statement, error) {
 		st.InsertColumnsListed = len(n.Columns) > 0
 		// INSERT ... SELECT * copies columns by position, so a star in the
 		// row source is the select-star case, not an incidental one.
-		st.SelectStar = rowSourceStar(n.Rows)
+		if sel, ok := n.Rows.(sqlparser.SelectStatement); ok {
+			var src analyzer.Statement
+			fillSelect(&src, sel, true)
+			st.SelectStar = src.SelectStar
+		}
 	default:
 		// A statement the grammar parsed but this parser does not model
 		// (CREATE VIEW ... AS SELECT, EXPLAIN, DDL, SHOW, ...). Nothing
@@ -132,6 +126,35 @@ func hasRowLimit(lim *sqlparser.Limit) bool {
 	return lim != nil && lim.Rowcount != nil
 }
 
+// fillSelect folds a SELECT, a parenthesised SELECT or a set operation into
+// st. top is false for the operands of a set operation, whose ORDER BY orders
+// that operand rather than the result and so is not merged. Every other fact
+// is true when any operand has it, which is how the fallback reads the same
+// text. For WHERE and LIMIT that is generous — one filtered operand does not
+// bound the other — but reading them per operand would report
+// select-without-limit where the fallback does not, and a parser may only
+// remove findings.
+func fillSelect(st *analyzer.Statement, sel sqlparser.SelectStatement, top bool) {
+	switch s := sel.(type) {
+	case *sqlparser.Select:
+		st.HasWhere = st.HasWhere || s.Where != nil
+		st.HasLimit = st.HasLimit || hasRowLimit(s.Limit)
+		st.HasOrderBy = st.HasOrderBy || (top && len(s.OrderBy) > 0)
+		st.HasFrom = st.HasFrom || hasRealFrom(s.From)
+		st.SelectDistinct = st.SelectDistinct || s.Distinct != ""
+		st.SelectStar = st.SelectStar || hasStar(s.SelectExprs)
+		st.OffsetValue = max(st.OffsetValue, offsetValue(s.Limit))
+	case *sqlparser.ParenSelect:
+		fillSelect(st, s.Select, top)
+	case *sqlparser.Union:
+		st.HasLimit = st.HasLimit || hasRowLimit(s.Limit)
+		st.HasOrderBy = st.HasOrderBy || (top && len(s.OrderBy) > 0)
+		st.OffsetValue = max(st.OffsetValue, offsetValue(s.Limit))
+		fillSelect(st, s.Left, false)
+		fillSelect(st, s.Right, false)
+	}
+}
+
 // hasStar reports whether a select list contains '*' or 'table.*'.
 func hasStar(exprs sqlparser.SelectExprs) bool {
 	for _, e := range exprs {
@@ -140,21 +163,6 @@ func hasStar(exprs sqlparser.SelectExprs) bool {
 		}
 	}
 	return false
-}
-
-// rowSourceStar reports whether an INSERT's row source is a SELECT whose own
-// select list uses a star. VALUES rows and set operations report false.
-func rowSourceStar(rows sqlparser.InsertRows) bool {
-	for {
-		switch r := rows.(type) {
-		case *sqlparser.Select:
-			return hasStar(r.SelectExprs)
-		case *sqlparser.ParenSelect:
-			rows = r.Select
-		default:
-			return false
-		}
-	}
 }
 
 // offsetValue extracts a literal OFFSET as an int, or 0 when there is no limit
