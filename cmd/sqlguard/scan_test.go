@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -580,9 +581,8 @@ func captureScanStreams(t *testing.T, target, format string) (stdout, stderr str
 	// the package hangs until the go test timeout.
 	var bufOut, bufErr bytes.Buffer
 	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() { defer wg.Done(); _, _ = bufOut.ReadFrom(rOut) }()
-	go func() { defer wg.Done(); _, _ = bufErr.ReadFrom(rErr) }()
+	wg.Go(func() { _, _ = bufOut.ReadFrom(rOut) })
+	wg.Go(func() { _, _ = bufErr.ReadFrom(rErr) })
 
 	err = runScan(&cobra.Command{}, []string{target})
 
@@ -922,9 +922,8 @@ func TestNewReporter_JSONTargetsStdout(t *testing.T) {
 
 	var bufOut, bufErr bytes.Buffer
 	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() { defer wg.Done(); _, _ = bufOut.ReadFrom(rOut) }()
-	go func() { defer wg.Done(); _, _ = bufErr.ReadFrom(rErr) }()
+	wg.Go(func() { _, _ = bufOut.ReadFrom(rOut) })
+	wg.Go(func() { _, _ = bufErr.ReadFrom(rErr) })
 
 	jr.Report([]analyzer.Result{{RuleName: "select-star"}})
 
@@ -970,8 +969,7 @@ func TestNewReporter_EachCallGetsItsOwnWriteError(t *testing.T) {
 
 	var sink bytes.Buffer
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() { defer wg.Done(); _, _ = sink.ReadFrom(rOK) }()
+	wg.Go(func() { _, _ = sink.ReadFrom(rOK) })
 
 	repBroken.Report([]analyzer.Result{{RuleName: "select-star"}})
 	repOK.Report([]analyzer.Result{{RuleName: "select-star"}})
@@ -990,4 +988,119 @@ func TestNewReporter_EachCallGetsItsOwnWriteError(t *testing.T) {
 	if !strings.Contains(sink.String(), "select-star") {
 		t.Errorf("the healthy reporter did not write its report:\n%s", sink.String())
 	}
+}
+
+// TestScan_DotsDirectoryWarns covers the one spelling where the pattern
+// reading hides a real directory. `...` stays a pattern — that is what every
+// Go tool does, and the go command cannot address such a directory at all —
+// but the run must say so, or a clean exit looks like the named tree was
+// examined when it was never opened.
+func TestScan_DotsDirectoryWarns(t *testing.T) {
+	root := t.TempDir()
+	queries := filepath.Join(root, "queries")
+	dots := filepath.Join(queries, "...")
+
+	requireDotsDirSupport(t)
+
+	if err := os.MkdirAll(dots, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	createTestFile(t, dots, "hidden.go", `package dots
+import "database/sql"
+func f(db *sql.DB) {
+	db.Exec("DELETE FROM audit_log")
+}
+`)
+	createTestFile(t, queries, "sibling.go", `package queries
+import "database/sql"
+func g(db *sql.DB) {
+	db.Query("SELECT id FROM t WHERE id = ? LIMIT 1", 1)
+}
+`)
+	noConfigFlag = true
+	t.Cleanup(func() { noConfigFlag = false })
+
+	// The pattern reading wins, and says so.
+	_, stderr, err := captureScanStreams(t, filepath.Join(queries, "..."), "console")
+	if err != nil {
+		t.Fatalf("expected a clean scan of the parent, got %v", err)
+	}
+	if !strings.Contains(stderr, "both a package pattern and an existing directory") {
+		t.Errorf("ambiguity was not reported:\n%s", stderr)
+	}
+	if strings.Contains(stderr, "delete-without-where") {
+		t.Errorf("pattern reading should not have entered the dots directory:\n%s", stderr)
+	}
+
+	// The trailing separator reaches the directory itself.
+	_, stderr, err = captureScanStreams(t, dots+string(filepath.Separator), "console")
+	if !errors.Is(err, errIssuesFound) {
+		t.Fatalf("trailing-separator form should scan the directory, got %v", err)
+	}
+	if !strings.Contains(stderr, "delete-without-where") {
+		t.Errorf("trailing-separator form missed the finding:\n%s", stderr)
+	}
+	if strings.Contains(stderr, "both a package pattern") {
+		t.Errorf("unambiguous form should not warn:\n%s", stderr)
+	}
+}
+
+// TestScan_NoWarningWithoutDotsDirectory keeps the warning off the ordinary
+// path: `./pkg/...` where no such directory exists must stay silent.
+func TestScan_NoWarningWithoutDotsDirectory(t *testing.T) {
+	dir := t.TempDir()
+	createTestFile(t, dir, "a.go", `package example
+import "database/sql"
+func f(db *sql.DB) {
+	db.Query("SELECT id FROM t WHERE id = ? LIMIT 1", 1)
+}
+`)
+	noConfigFlag = true
+	t.Cleanup(func() { noConfigFlag = false })
+
+	_, stderr, err := captureScanStreams(t, filepath.Join(dir, "..."), "console")
+	if err != nil {
+		t.Fatalf("expected a clean scan, got %v", err)
+	}
+	if strings.Contains(stderr, "both a package pattern") {
+		t.Errorf("warned with no dots directory present:\n%s", stderr)
+	}
+}
+
+// requireDotsDirSupport skips when the filesystem cannot represent a directory
+// named "..." — Win32 strips trailing dots from a path component, so the name
+// does not survive there.
+//
+// It decides that on its own probe directory, and only after confirming an
+// ordinary name works in the same place. A permission, quota or disk error
+// would otherwise look identical to an unrepresentable name and skip the whole
+// test, letting the suite pass without checking the warning or the
+// trailing-separator scan at all. Those causes fail instead.
+//
+// Discriminating this way rather than by errno keeps it independent of how a
+// given platform reports an invalid name.
+func requireDotsDirSupport(t *testing.T) {
+	t.Helper()
+
+	base := t.TempDir()
+	dotsErr := os.Mkdir(filepath.Join(base, "..."), 0o755)
+
+	if dotsErr == nil {
+		entries, err := os.ReadDir(base)
+		if err != nil {
+			t.Fatalf("probing %s: %v", base, err)
+		}
+		if slices.ContainsFunc(entries, func(e os.DirEntry) bool { return e.Name() == "..." }) {
+			return
+		}
+		t.Skipf("this filesystem stored a directory named %q under another name", "...")
+	}
+
+	// The name failed. Only a filesystem that accepts an ordinary name in the
+	// same directory tells us the name itself was the problem.
+	if err := os.Mkdir(filepath.Join(base, "ordinary"), 0o755); err != nil {
+		t.Fatalf("cannot create directories under %s at all: %v (creating %q failed with %v)",
+			base, err, "...", dotsErr)
+	}
+	t.Skipf("this filesystem will not create a directory named %q: %v", "...", dotsErr)
 }

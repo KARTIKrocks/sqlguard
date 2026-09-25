@@ -72,6 +72,13 @@ the same version in lockstep.
   saw nothing. `scan` and `explain` now write JSON to stdout; the console
   format and the summary lines stay on stderr. A clean run also emits `[]`
   instead of nothing, so a consumer is never handed an empty file to parse.
+- **CLI `scan` said nothing when a path argument was ambiguous.** A trailing
+  `...` is read as the package pattern, so a real directory of that name was
+  skipped and the run could exit clean without opening the tree that was
+  named. The pattern still wins — that is what the go command does, and
+  deciding by what is on disk would make `./q/...` stop being recursive the
+  day `q/...` appeared — but the ambiguity is now reported, and a trailing
+  slash (`./q/.../`) addresses the directory.
 - **CLI `scan` rejected the `./...` path every doc example uses**, failing with
   `scan failed: lstat ./...: no such file or directory`. The scan has always
   been recursive, so the pattern suffix is now trimmed and `./pkg/...` selects
