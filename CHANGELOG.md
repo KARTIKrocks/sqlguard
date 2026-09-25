@@ -27,6 +27,22 @@ the same version in lockstep.
   when it answers `ErrSkip`, so the prepare path remains the single analysis
   point. On this path findings are produced after execution rather than
   before, which nothing consumes.
+- **A query retried after `driver.ErrBadConn` is no longer analyzed once per
+  attempt.** `database/sql` retries a failed query on another connection —
+  twice from the pool, then once on a fresh connection — and every attempt
+  re-entered the wrapper, so one logical query could be analyzed three times.
+  `ErrBadConn`'s contract is that a driver must not return it when the
+  operation may have been performed, so a declined attempt executed nothing
+  and is now skipped, at the connection and the statement level alike. This is
+  the same N+1 inflation as [#67] from the other per-call "did not run"
+  answer, and it surfaces whenever pooled connections go stale: MySQL's
+  `wait_timeout`, a server restart, a failover.
+- **A statement call rejected by argument conversion is no longer analyzed.**
+  `wStmt.ExecContext`/`QueryContext` ran the rules before converting named
+  parameters for a base that predates them, so a call that failed with
+  `sqlguard: driver does not support named parameters` — without ever
+  reaching the database — still produced findings and incremented the N+1
+  counter.
 
 - **`pgparser` no longer reports `insert-without-columns` on
   `INSERT INTO t DEFAULT VALUES`** ([#68]). The grammar encodes that form as

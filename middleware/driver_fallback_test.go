@@ -6,6 +6,8 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"io"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -77,6 +79,35 @@ func (*queryerConn) QueryContext(context.Context, string, []driver.NamedValue) (
 }
 
 func (*queryerConn) ExecContext(context.Context, string, []driver.NamedValue) (driver.Result, error) {
+	return driver.RowsAffected(0), nil
+}
+
+// fakeBadConnDriver fails the first two executions with driver.ErrBadConn,
+// as a driver does when the pool hands out a connection the server has since
+// closed (MySQL's wait_timeout, a restart, a failover). database/sql retries
+// the whole query on a fresh connection, re-entering the wrapper — and by
+// ErrBadConn's contract the declined attempts executed nothing, so they must
+// not be analyzed.
+type fakeBadConnDriver struct{ fails atomic.Int64 }
+
+func (d *fakeBadConnDriver) Open(string) (driver.Conn, error) { return &badConn{d: d}, nil }
+
+type badConn struct {
+	fakeConn
+	d *fakeBadConnDriver
+}
+
+func (c *badConn) QueryContext(context.Context, string, []driver.NamedValue) (driver.Rows, error) {
+	if c.d.fails.Add(-1) >= 0 {
+		return nil, driver.ErrBadConn
+	}
+	return &fakeRows{}, nil
+}
+
+func (c *badConn) ExecContext(context.Context, string, []driver.NamedValue) (driver.Result, error) {
+	if c.d.fails.Add(-1) >= 0 {
+		return nil, driver.ErrBadConn
+	}
 	return driver.RowsAffected(0), nil
 }
 
@@ -189,6 +220,68 @@ func TestDriver_DirectQueryerAnalyzedOnce(t *testing.T) {
 
 func TestDriver_DirectQueryerN1CountedOnce(t *testing.T) {
 	assertOneQueryDoesNotTripN1(t, fakeQueryerDriver{})
+}
+
+// database/sql retries a query on driver.ErrBadConn (twice on a pooled
+// connection, then once on a brand-new one). Each retry re-enters the wrapper,
+// so analyzing a declined attempt multiplies one logical query by up to three
+// — the same N+1 inflation as #67, from the other per-call "did not run"
+// answer.
+func TestDriver_BadConnRetryAnalyzedOnce(t *testing.T) {
+	base := &fakeBadConnDriver{}
+	base.fails.Store(2)
+	db, rep := openFakeGuarded(t, base)
+
+	rows, err := db.Query("DELETE FROM accounts") // flagged: delete-without-where
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	rows.Close()
+
+	if got := base.fails.Load(); got != -1 {
+		t.Fatalf("expected the base to be called three times (two declines, one success), got %d remaining", got)
+	}
+	if got := rep.count(); got != 1 {
+		t.Errorf("a query retried past ErrBadConn must be analyzed once, got %d", got)
+	}
+}
+
+func TestDriver_BadConnRetryN1CountedOnce(t *testing.T) {
+	base := &fakeBadConnDriver{}
+	base.fails.Store(2)
+	db, rep := openFakeGuarded(t, base, WithN1Detection(2, time.Minute))
+
+	rows, err := db.Query("SELECT id, name FROM users WHERE id = ?", 1)
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	rows.Close()
+
+	if got := rep.count(); got != 0 {
+		t.Errorf("one logical query must not trip N+1 (threshold 2) however often it was retried; got %d reports", got)
+	}
+}
+
+// A statement whose arguments the legacy conversion rejects never reaches the
+// base, so there is nothing to analyze: fakeStmt implements neither
+// StmtQueryContext nor NamedValueChecker, and named parameters have no
+// positional form.
+func TestDriver_RejectedNamedArgsNotAnalyzed(t *testing.T) {
+	db, rep := openFakeGuarded(t, fakeNoQueryerDriver{})
+
+	// select-star would be reported if this were analyzed.
+	rows, err := db.Query("SELECT * FROM users WHERE id = :id", sql.Named("id", 1))
+	if err == nil {
+		rows.Close()
+		t.Fatal("expected the named-parameter conversion to fail")
+	}
+	if !strings.Contains(err.Error(), "does not support named parameters") {
+		t.Fatalf("expected the wrapper's own conversion error, got %v", err)
+	}
+
+	if got := rep.count(); got != 0 {
+		t.Errorf("a query rejected before it reached the base must not be analyzed, got %d", got)
+	}
 }
 
 // assertOneQueryDoesNotTripN1 runs a single non-flagged query against base

@@ -102,8 +102,10 @@ declines an individual query with `driver.ErrSkip` — `go-sql-driver/mysql`
 does this for every parameterized query unless `interpolateParams=true`.
 Before 0.5 that query was analyzed twice: once before the base declined, once
 on the fallback path. N+1 counts were doubled on MySQL as a result. Analysis
-on the direct path now happens once the base has answered, so a declined query
-is analyzed only where it actually runs.
+now happens once the base has answered, so a declined query is analyzed only
+where it actually runs. The same holds for `driver.ErrBadConn`, which
+`database/sql` answers by retrying the query on another connection: the
+attempt that hit the dead connection executed nothing, so it is not counted.
 
 The wrapper never modifies the SQL text or the arguments. It observes.
 
