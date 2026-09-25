@@ -132,9 +132,12 @@ type Statement struct {
 	// treat zero as unknown and not as "short", to avoid false negatives.
 	LeadingWildcardTermLen int
 
-	// Exact is true when the Statement was produced by a real SQL parser
-	// (structural analysis), false when produced by the regex fallback
+	// Exact is true when a real SQL parser derived the Statement's structural
+	// facts from an AST, false when they came from the regex fallback
 	// (best-effort). Rules may use this to suppress lower-confidence findings.
+	// A dialect parser that accepts a statement it does not model (DDL,
+	// EXPLAIN, CREATE VIEW ... AS SELECT) returns the fallback's Statement
+	// unchanged, so Exact is false there too.
 	//
 	// "Exact" covers the structural facts the dialect parsers derive from the
 	// AST: Kind, HasWhere/HasLimit/HasOrderBy/HasFrom, SelectStar,

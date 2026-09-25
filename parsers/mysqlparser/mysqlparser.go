@@ -56,6 +56,63 @@ func (p *Parser) Parse(sql string) (*analyzer.Statement, error) {
 		return st, nil
 	}
 
+	switch n := ast.(type) {
+	case *sqlparser.Select:
+		resetStructural(st)
+		st.Kind = analyzer.StmtSelect
+		st.HasWhere = n.Where != nil
+		st.HasLimit = hasRowLimit(n.Limit)
+		st.HasOrderBy = len(n.OrderBy) > 0
+		st.HasFrom = hasRealFrom(n.From)
+		st.SelectDistinct = n.Distinct != ""
+		st.OffsetValue = offsetValue(n.Limit)
+		st.SelectStar = hasStar(n.SelectExprs)
+	case *sqlparser.Union:
+		// Same shape as pgparser's set operations: the ORDER BY / LIMIT that
+		// apply to the whole result are read, the arms' FROM/WHERE are not.
+		resetStructural(st)
+		st.Kind = analyzer.StmtSelect
+		st.HasLimit = hasRowLimit(n.Limit)
+		st.HasOrderBy = len(n.OrderBy) > 0
+		st.OffsetValue = offsetValue(n.Limit)
+	case *sqlparser.Delete:
+		resetStructural(st)
+		st.Kind = analyzer.StmtDelete
+		st.HasWhere = n.Where != nil
+		st.HasLimit = hasRowLimit(n.Limit)
+		st.HasOrderBy = len(n.OrderBy) > 0
+		st.OffsetValue = offsetValue(n.Limit)
+	case *sqlparser.Update:
+		resetStructural(st)
+		st.Kind = analyzer.StmtUpdate
+		st.HasWhere = n.Where != nil
+		st.HasLimit = hasRowLimit(n.Limit)
+		st.HasOrderBy = len(n.OrderBy) > 0
+		st.OffsetValue = offsetValue(n.Limit)
+	case *sqlparser.Insert:
+		resetStructural(st)
+		st.Kind = analyzer.StmtInsert
+		st.InsertColumnsListed = len(n.Columns) > 0
+		// INSERT ... SELECT * copies columns by position, so a star in the
+		// row source is the select-star case, not an incidental one.
+		st.SelectStar = rowSourceStar(n.Rows)
+	default:
+		// A statement the grammar parsed but this parser does not model
+		// (CREATE VIEW ... AS SELECT, EXPLAIN, DDL, SHOW, ...). Nothing
+		// structural was derived from its AST, so the fallback's facts stand
+		// and the Statement is not Exact. Blanking them instead would silently
+		// drop findings the default parser reports (#81).
+		return st, nil
+	}
+
+	st.Exact = true
+	return st, nil
+}
+
+// resetStructural clears the fields a handled AST node recomputes, so a
+// fallback guess can't survive into a Statement marked Exact. Only called for
+// nodes this parser models; the rest keep the fallback's values.
+func resetStructural(st *analyzer.Statement) {
 	st.Kind = analyzer.StmtOther
 	st.HasWhere = false
 	st.HasLimit = false
@@ -65,40 +122,39 @@ func (p *Parser) Parse(sql string) (*analyzer.Statement, error) {
 	st.SelectDistinct = false
 	st.OffsetValue = 0
 	st.InsertColumnsListed = false
+}
 
-	switch n := ast.(type) {
-	case *sqlparser.Select:
-		st.Kind = analyzer.StmtSelect
-		st.HasWhere = n.Where != nil
-		st.HasLimit = n.Limit != nil
-		st.HasOrderBy = len(n.OrderBy) > 0
-		st.HasFrom = hasRealFrom(n.From)
-		st.SelectDistinct = n.Distinct != ""
-		st.OffsetValue = offsetValue(n.Limit)
-		for _, e := range n.SelectExprs {
-			if _, ok := e.(*sqlparser.StarExpr); ok { // '*' or 'table.*'
-				st.SelectStar = true
-			}
+// hasRowLimit reports whether a limit clause bounds the row count, mirroring
+// pgparser. MySQL has no bare OFFSET (the grammar rejects it and the fallback
+// takes over), so today every Limit node carries a Rowcount; the check keeps
+// the two parsers answering the same question.
+func hasRowLimit(lim *sqlparser.Limit) bool {
+	return lim != nil && lim.Rowcount != nil
+}
+
+// hasStar reports whether a select list contains '*' or 'table.*'.
+func hasStar(exprs sqlparser.SelectExprs) bool {
+	for _, e := range exprs {
+		if _, ok := e.(*sqlparser.StarExpr); ok {
+			return true
 		}
-	case *sqlparser.Delete:
-		st.Kind = analyzer.StmtDelete
-		st.HasWhere = n.Where != nil
-		st.HasLimit = n.Limit != nil
-		st.HasOrderBy = len(n.OrderBy) > 0
-		st.OffsetValue = offsetValue(n.Limit)
-	case *sqlparser.Update:
-		st.Kind = analyzer.StmtUpdate
-		st.HasWhere = n.Where != nil
-		st.HasLimit = n.Limit != nil
-		st.HasOrderBy = len(n.OrderBy) > 0
-		st.OffsetValue = offsetValue(n.Limit)
-	case *sqlparser.Insert:
-		st.Kind = analyzer.StmtInsert
-		st.InsertColumnsListed = len(n.Columns) > 0
 	}
+	return false
+}
 
-	st.Exact = true
-	return st, nil
+// rowSourceStar reports whether an INSERT's row source is a SELECT whose own
+// select list uses a star. VALUES rows and set operations report false.
+func rowSourceStar(rows sqlparser.InsertRows) bool {
+	for {
+		switch r := rows.(type) {
+		case *sqlparser.Select:
+			return hasStar(r.SelectExprs)
+		case *sqlparser.ParenSelect:
+			rows = r.Select
+		default:
+			return false
+		}
+	}
 }
 
 // offsetValue extracts a literal OFFSET as an int, or 0 when there is no limit

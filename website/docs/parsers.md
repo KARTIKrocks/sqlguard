@@ -72,7 +72,12 @@ Neither parser uses cgo.
 | `LeadingWildcardLike`, `LeadingWildcardTermLen`, `NonSargablePredicate`, `AddNotNullNoDefault` | lexical | **still lexical** — they read literal values or DDL text the AST does not carry |
 
 The first group is the false-positive-prone set; those become exact
-(`Statement.Exact == true`). The rest stay best-effort heuristics
+(`Statement.Exact == true`) for the statements each parser models:
+`SELECT` (including set operations), `INSERT`, `UPDATE` and `DELETE`.
+_Changed in 0.6._ A statement the grammar accepts but the parser does not
+model — DDL, `EXPLAIN`, `CREATE VIEW … AS SELECT` — keeps the fallback's
+facts and `Exact == false`; before, every structural field on it was
+cleared and the statement was still marked exact. The rest stay best-effort heuristics
 regardless of the parser, and each field's doc comment says so. This is a
 documented carve-out, not a gap waiting to be closed.
 
@@ -94,6 +99,20 @@ grammar recognised as inserting rows and the fallback did not:
   and on `UPSERT INTO t VALUES (…)`, plain or behind a CTE.
 - `mysqlparser` reported it on `REPLACE INTO t VALUES (…)` and on the
   forms that omit MySQL's optional `INTO`, such as `INSERT t VALUES (…)`.
+
+_Changed in 0.6._ **A dialect parser also should not drop a finding it
+has no reason to drop.** Removing a finding is only an improvement when
+the grammar derived something that disproves it. In 0.5 and earlier
+both parsers dropped findings they had derived nothing about:
+
+- `select-star` on `CREATE VIEW v AS SELECT * FROM t`,
+  `CREATE TABLE c AS SELECT * FROM t` and `EXPLAIN SELECT * FROM t`,
+  whose structural fields were cleared rather than kept from the fallback.
+- `select-star` on `INSERT INTO t (a) SELECT * FROM u`, whose row source
+  was never inspected.
+- Under `pgparser`, `select-without-limit` and `orderby-without-limit` on a
+  bare `OFFSET` with no `LIMIT`, which was read as a limit. `LIMIT ALL`
+  still counts as one: it states that no limit is wanted.
 
 ## Degradation on parse failure
 

@@ -1,6 +1,7 @@
 package mysqlparser
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -99,6 +100,33 @@ func TestParser_ExactStructuralFacts(t *testing.T) {
 			sql:  "SELECT id FROM users WHERE x = 1 LIMIT 5000, 10",
 			want: analyzer.Statement{Kind: analyzer.StmtSelect, HasFrom: true, HasWhere: true, HasLimit: true, OffsetValue: 5000, Exact: true},
 		},
+		{
+			name: "insert select star",
+			sql:  "INSERT INTO t (a) SELECT * FROM u",
+			want: analyzer.Statement{Kind: analyzer.StmtInsert, InsertColumnsListed: true, SelectStar: true, Exact: true},
+		},
+		{
+			name: "replace select star",
+			sql:  "REPLACE INTO t (a) SELECT * FROM u",
+			want: analyzer.Statement{Kind: analyzer.StmtInsert, InsertColumnsListed: true, SelectStar: true, Exact: true},
+		},
+		{
+			name: "insert values has no star",
+			sql:  "INSERT INTO t (a) VALUES (1)",
+			want: analyzer.Statement{Kind: analyzer.StmtInsert, InsertColumnsListed: true, Exact: true},
+		},
+		{
+			// Set operations read like pgparser's: the ORDER BY / LIMIT that
+			// apply to the whole result, not the arms' own clauses.
+			name: "union with order by",
+			sql:  "SELECT a FROM t UNION SELECT b FROM u ORDER BY a",
+			want: analyzer.Statement{Kind: analyzer.StmtSelect, HasOrderBy: true, Exact: true},
+		},
+		{
+			name: "union with limit",
+			sql:  "SELECT a FROM t UNION SELECT b FROM u ORDER BY a LIMIT 10",
+			want: analyzer.Statement{Kind: analyzer.StmtSelect, HasOrderBy: true, HasLimit: true, Exact: true},
+		},
 	}
 
 	for _, tt := range tests {
@@ -148,6 +176,59 @@ func TestParser_IntegratesWithAnalyzer(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("expected update-without-where (WHERE only in comment), got %+v", got)
+	}
+}
+
+// TestParser_KeepsFallbackFactsForUnmodelledStatements pins the other half of
+// the parity contract: a statement the grammar parses but this parser has no
+// case for derives nothing from its AST, so it must come back exactly as the
+// fallback built it, not Exact. Blanking the structural fields there dropped
+// select-star from CREATE VIEW ... AS SELECT * and its kin (#81).
+func TestParser_KeepsFallbackFactsForUnmodelledStatements(t *testing.T) {
+	for _, sql := range []string{
+		"CREATE VIEW v AS SELECT * FROM t",
+		"EXPLAIN SELECT * FROM t",
+		"ALTER TABLE t ADD COLUMN c INT NOT NULL",
+		"CREATE TABLE t (id INT)",
+		"SHOW TABLES",
+		"SET autocommit = 1",
+	} {
+		t.Run(sql, func(t *testing.T) {
+			want, _ := analyzer.NewFallbackParser().Parse(sql)
+			got, err := New().Parse(sql)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Errorf("Parse(%q)\n got: %+v\nwant: %+v", sql, *got, *want)
+			}
+		})
+	}
+}
+
+// TestParser_KeepsFindingsTheGrammarHasNoReasonToDrop pins specific findings
+// the grammar once dropped without having derived anything that disproves them.
+func TestParser_KeepsFindingsTheGrammarHasNoReasonToDrop(t *testing.T) {
+	a := analyzer.Default().WithParser(New())
+	tests := []struct {
+		sql  string
+		want []string
+	}{
+		{"CREATE VIEW v AS SELECT * FROM t", []string{"select-star"}},
+		{"EXPLAIN SELECT * FROM t", []string{"select-star"}},
+		{"INSERT INTO t (a) SELECT * FROM u", []string{"select-star"}},
+		{"REPLACE INTO t (a) SELECT * FROM u", []string{"select-star"}},
+		{"SELECT a FROM t UNION SELECT b FROM u ORDER BY a", []string{"orderby-without-limit"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.sql, func(t *testing.T) {
+			got := ruleSet(a.Analyze(tt.sql))
+			for _, name := range tt.want {
+				if _, ok := got[name]; !ok {
+					t.Errorf("missing %q, got %v", name, got)
+				}
+			}
+		})
 	}
 }
 
@@ -213,6 +294,13 @@ func TestParser_NeverAddsFindingTheFallbackDoesNot(t *testing.T) {
 		"SELECT a FROM t WHERE name LIKE '%abc%'",
 		"SELECT `a` FROM `t`",
 		"(SELECT a FROM t) UNION (SELECT b FROM u)",
+		"SELECT a FROM t UNION SELECT b FROM u ORDER BY a",
+		"SELECT a FROM t UNION SELECT b FROM u ORDER BY a LIMIT 10",
+		"INSERT INTO t (a) SELECT * FROM u",
+		"REPLACE INTO t (a) SELECT * FROM u",
+		"CREATE VIEW v AS SELECT * FROM t",
+		"EXPLAIN SELECT * FROM t",
+		"SHOW TABLES",
 	}
 
 	fallback := analyzer.Default()
