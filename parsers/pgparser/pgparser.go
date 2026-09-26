@@ -55,12 +55,16 @@ func (p *Parser) Parse(sql string) (*analyzer.Statement, error) {
 
 	switch n := stmts[0].AST.(type) {
 	case *tree.Select:
+		fb := *st
 		resetStructural(st)
 		st.Kind = analyzer.StmtSelect
 		st.HasOrderBy = len(n.OrderBy) > 0
 		st.HasLimit = hasRowLimit(n.Limit)
 		st.OffsetValue = offsetValue(n.Limit)
 		fillSelectBody(st, n.Select)
+		if isSetOperation(n.Select) {
+			keepFallbackBounds(st, &fb)
+		}
 	case *tree.SelectClause:
 		resetStructural(st)
 		st.Kind = analyzer.StmtSelect
@@ -157,27 +161,49 @@ func fillSelectBody(st *analyzer.Statement, sel tree.SelectStatement) {
 }
 
 // mergeArm folds one operand of a set operation (UNION / INTERSECT / EXCEPT)
-// into st. Each fact is true when any arm has it, which is how the fallback
-// reads the same text: a star or a FROM in either arm is one in the statement,
-// and a WHERE or LIMIT in either arm counts too. The last two are generous —
-// one filtered arm does not bound the other — but reading them per-arm would
-// report select-without-limit where the fallback does not, and a parser may
-// only remove findings. An arm's ORDER BY is not merged: it orders that arm,
-// not the result.
+// into st: a FROM, a star, a DISTINCT or a literal OFFSET in either operand is
+// one in the statement. Its WHERE and LIMIT are left to keepFallbackBounds, and
+// its ORDER BY orders that operand, not the result, so it is not merged.
 func mergeArm(st *analyzer.Statement, arm *tree.Select) {
 	if arm == nil {
 		return
 	}
 	var a analyzer.Statement
-	a.HasLimit = hasRowLimit(arm.Limit)
 	a.OffsetValue = offsetValue(arm.Limit)
 	fillSelectBody(&a, arm.Select)
-	st.HasWhere = st.HasWhere || a.HasWhere
 	st.HasFrom = st.HasFrom || a.HasFrom
-	st.HasLimit = st.HasLimit || a.HasLimit
 	st.SelectStar = st.SelectStar || a.SelectStar
 	st.SelectDistinct = st.SelectDistinct || a.SelectDistinct
 	st.OffsetValue = max(st.OffsetValue, a.OffsetValue)
+}
+
+// isSetOperation reports whether a select body is a UNION / INTERSECT /
+// EXCEPT, looking through parentheses around the whole of it.
+func isSetOperation(sel tree.SelectStatement) bool {
+	for {
+		switch c := sel.(type) {
+		case *tree.UnionClause:
+			return true
+		case *tree.ParenSelect:
+			if c.Select == nil {
+				return false
+			}
+			sel = c.Select.Select
+		default:
+			return false
+		}
+	}
+}
+
+// keepFallbackBounds takes a set operation's WHERE and LIMIT presence from the
+// fallback, which counts them anywhere in the text — inside an operand's
+// subquery too. Reading them from the operands' top level instead reports
+// select-without-limit on SELECT a FROM t UNION SELECT b FROM (SELECT b FROM u
+// LIMIT 3) s, which the fallback does not, and a parser may only remove
+// findings. A LIMIT on the whole result is still read from the AST.
+func keepFallbackBounds(st, fb *analyzer.Statement) {
+	st.HasWhere = fb.HasWhere
+	st.HasLimit = st.HasLimit || fb.HasLimit
 }
 
 // offsetValue extracts a literal OFFSET as an int, or 0 when there is no limit

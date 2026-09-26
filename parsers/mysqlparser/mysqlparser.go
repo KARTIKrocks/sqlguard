@@ -62,9 +62,11 @@ func (p *Parser) Parse(sql string) (*analyzer.Statement, error) {
 		st.Kind = analyzer.StmtSelect
 		fillSelect(st, n, true)
 	case *sqlparser.Union:
+		fb := *st
 		resetStructural(st)
 		st.Kind = analyzer.StmtSelect
 		fillSelect(st, n, true)
+		keepFallbackBounds(st, &fb)
 	case *sqlparser.Delete:
 		resetStructural(st)
 		st.Kind = analyzer.StmtDelete
@@ -127,19 +129,18 @@ func hasRowLimit(lim *sqlparser.Limit) bool {
 }
 
 // fillSelect folds a SELECT, a parenthesised SELECT or a set operation into
-// st. top is false for the operands of a set operation, whose ORDER BY orders
-// that operand rather than the result and so is not merged. Every other fact
-// is true when any operand has it, which is how the fallback reads the same
-// text. For WHERE and LIMIT that is generous — one filtered operand does not
-// bound the other — but reading them per operand would report
-// select-without-limit where the fallback does not, and a parser may only
-// remove findings.
+// st. top is false for the operands of a set operation: a FROM, a star, a
+// DISTINCT or a literal OFFSET in either operand is one in the statement, but
+// an operand's ORDER BY orders that operand rather than the result, and its
+// WHERE and LIMIT are left to keepFallbackBounds.
 func fillSelect(st *analyzer.Statement, sel sqlparser.SelectStatement, top bool) {
 	switch s := sel.(type) {
 	case *sqlparser.Select:
-		st.HasWhere = st.HasWhere || s.Where != nil
-		st.HasLimit = st.HasLimit || hasRowLimit(s.Limit)
-		st.HasOrderBy = st.HasOrderBy || (top && len(s.OrderBy) > 0)
+		if top {
+			st.HasWhere = s.Where != nil
+			st.HasLimit = hasRowLimit(s.Limit)
+			st.HasOrderBy = len(s.OrderBy) > 0
+		}
 		st.HasFrom = st.HasFrom || hasRealFrom(s.From)
 		st.SelectDistinct = st.SelectDistinct || s.Distinct != ""
 		st.SelectStar = st.SelectStar || hasStar(s.SelectExprs)
@@ -147,12 +148,25 @@ func fillSelect(st *analyzer.Statement, sel sqlparser.SelectStatement, top bool)
 	case *sqlparser.ParenSelect:
 		fillSelect(st, s.Select, top)
 	case *sqlparser.Union:
-		st.HasLimit = st.HasLimit || hasRowLimit(s.Limit)
-		st.HasOrderBy = st.HasOrderBy || (top && len(s.OrderBy) > 0)
+		if top {
+			st.HasLimit = hasRowLimit(s.Limit)
+			st.HasOrderBy = len(s.OrderBy) > 0
+		}
 		st.OffsetValue = max(st.OffsetValue, offsetValue(s.Limit))
 		fillSelect(st, s.Left, false)
 		fillSelect(st, s.Right, false)
 	}
+}
+
+// keepFallbackBounds takes a set operation's WHERE and LIMIT presence from the
+// fallback, which counts them anywhere in the text — inside an operand's
+// subquery too. Reading them from the operands' top level instead reports
+// select-without-limit on SELECT a FROM t UNION SELECT b FROM (SELECT b FROM u
+// LIMIT 3) s, which the fallback does not, and a parser may only remove
+// findings. A LIMIT on the whole result is still read from the AST.
+func keepFallbackBounds(st, fb *analyzer.Statement) {
+	st.HasWhere = fb.HasWhere
+	st.HasLimit = st.HasLimit || fb.HasLimit
 }
 
 // hasStar reports whether a select list contains '*' or 'table.*'.
