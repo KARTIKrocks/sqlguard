@@ -370,7 +370,11 @@ func hasTopLevelJoin(region string) bool {
 // zero — a result-set sort, not a window-function (OVER (ORDER BY ...)),
 // ordered-aggregate (GROUP_CONCAT(... ORDER BY ...), WITHIN GROUP (ORDER BY
 // ...)), or subquery ordering, none of which sort the statement's result set.
+// Parentheses around the whole statement are not a subquery, so they are
+// unwrapped first: "(SELECT ... ORDER BY a)" sorts its result like the bare
+// form, and the dialect grammars read it that way.
 func hasTopLevelOrderBy(sanitized string) bool {
+	sanitized = unwrapStatementParens(sanitized)
 	for _, loc := range fbOrderByRe.FindAllStringIndex(sanitized, -1) {
 		if parenDepthBefore(sanitized, loc[0]) == 0 {
 			return true
@@ -437,6 +441,25 @@ func parenContent(s string, open int) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// unwrapStatementParens strips parentheses that enclose the entire statement
+// (an optional trailing ";" aside), repeatedly, so "((SELECT 1))" yields
+// "SELECT 1". A statement that merely starts with a parenthesised operand, like
+// "(SELECT a FROM t) UNION (SELECT b FROM u)", is returned unchanged.
+func unwrapStatementParens(sanitized string) string {
+	for {
+		s := strings.TrimSpace(sanitized)
+		s = strings.TrimSpace(strings.TrimSuffix(s, ";"))
+		if !strings.HasPrefix(s, "(") {
+			return sanitized
+		}
+		inner, ok := parenContent(s, 0)
+		if !ok || len(inner)+2 != len(s) {
+			return sanitized
+		}
+		sanitized = inner
+	}
 }
 
 // fromRegion returns the slice of sanitized SQL between the first top-level

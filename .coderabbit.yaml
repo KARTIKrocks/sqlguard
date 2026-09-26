@@ -150,6 +150,11 @@ reviews:
         derive structural facts from the AST but intentionally keep MaxInListLen,
         ImplicitCommaJoin and CartesianJoin as fallback heuristics — that carve-
         out is documented, not a bug.
+        Structural fields are reset only inside the case for an AST node the
+        parser models; any other node returns the fallback's Statement untouched
+        with Exact=false, because blanking fields nothing was derived for drops
+        findings silently (#81). HasLimit means a row count, not a limit node
+        (#82).
 
     - path: "config/**"
       instructions: >-

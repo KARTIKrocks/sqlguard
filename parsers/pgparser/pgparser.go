@@ -53,6 +53,64 @@ func (p *Parser) Parse(sql string) (*analyzer.Statement, error) {
 		return st, nil
 	}
 
+	switch n := stmts[0].AST.(type) {
+	case *tree.Select:
+		fb := *st
+		resetStructural(st)
+		st.Kind = analyzer.StmtSelect
+		st.HasOrderBy = len(n.OrderBy) > 0
+		st.HasLimit = hasRowLimit(n.Limit)
+		st.OffsetValue = offsetValue(n.Limit)
+		fillSelectBody(st, n.Select)
+		if isSetOperation(n.Select) {
+			keepFallbackBounds(st, &fb)
+		}
+	case *tree.SelectClause:
+		resetStructural(st)
+		st.Kind = analyzer.StmtSelect
+		fillSelectClause(st, n)
+	case *tree.Delete:
+		resetStructural(st)
+		st.Kind = analyzer.StmtDelete
+		st.HasWhere = n.Where != nil
+		st.HasLimit = hasRowLimit(n.Limit)
+		st.HasOrderBy = len(n.OrderBy) > 0
+		st.OffsetValue = offsetValue(n.Limit)
+	case *tree.Update:
+		resetStructural(st)
+		st.Kind = analyzer.StmtUpdate
+		st.HasWhere = n.Where != nil
+		st.HasLimit = hasRowLimit(n.Limit)
+		st.HasOrderBy = len(n.OrderBy) > 0
+		st.OffsetValue = offsetValue(n.Limit)
+	case *tree.Insert:
+		resetStructural(st)
+		st.Kind = analyzer.StmtInsert
+		st.InsertColumnsListed = len(n.Columns) > 0 || defaultValues(n)
+		if !defaultValues(n) {
+			// INSERT ... SELECT * copies columns by position, so a star in the
+			// row source is the select-star case, not an incidental one.
+			var src analyzer.Statement
+			fillSelectBody(&src, n.Rows.Select)
+			st.SelectStar = src.SelectStar
+		}
+	default:
+		// A statement the grammar parsed but this parser does not model
+		// (CREATE VIEW ... AS SELECT, EXPLAIN, DDL, ...). Nothing structural
+		// was derived from its AST, so the fallback's facts stand and the
+		// Statement is not Exact. Blanking them instead would silently drop
+		// findings the default parser reports (#81).
+		return st, nil
+	}
+
+	st.Exact = true
+	return st, nil
+}
+
+// resetStructural clears the fields a handled AST node recomputes, so a
+// fallback guess can't survive into a Statement marked Exact. Only called for
+// nodes this parser models; the rest keep the fallback's values.
+func resetStructural(st *analyzer.Statement) {
 	st.Kind = analyzer.StmtOther
 	st.HasWhere = false
 	st.HasLimit = false
@@ -62,36 +120,14 @@ func (p *Parser) Parse(sql string) (*analyzer.Statement, error) {
 	st.SelectDistinct = false
 	st.OffsetValue = 0
 	st.InsertColumnsListed = false
+}
 
-	switch n := stmts[0].AST.(type) {
-	case *tree.Select:
-		st.Kind = analyzer.StmtSelect
-		st.HasOrderBy = len(n.OrderBy) > 0
-		st.HasLimit = n.Limit != nil
-		st.OffsetValue = offsetValue(n.Limit)
-		fillSelectBody(st, n.Select)
-	case *tree.SelectClause:
-		st.Kind = analyzer.StmtSelect
-		fillSelectClause(st, n)
-	case *tree.Delete:
-		st.Kind = analyzer.StmtDelete
-		st.HasWhere = n.Where != nil
-		st.HasLimit = n.Limit != nil
-		st.HasOrderBy = len(n.OrderBy) > 0
-		st.OffsetValue = offsetValue(n.Limit)
-	case *tree.Update:
-		st.Kind = analyzer.StmtUpdate
-		st.HasWhere = n.Where != nil
-		st.HasLimit = n.Limit != nil
-		st.HasOrderBy = len(n.OrderBy) > 0
-		st.OffsetValue = offsetValue(n.Limit)
-	case *tree.Insert:
-		st.Kind = analyzer.StmtInsert
-		st.InsertColumnsListed = len(n.Columns) > 0 || defaultValues(n)
-	}
-
-	st.Exact = true
-	return st, nil
+// hasRowLimit reports whether a limit clause bounds the row count. The grammar
+// builds a Limit node for a bare OFFSET too, which bounds nothing (#82).
+// LIMIT ALL is unbounded as well, but it is an explicit statement that no limit
+// is wanted, and the fallback reads it as a LIMIT, so it counts here too.
+func hasRowLimit(lim *tree.Limit) bool {
+	return lim != nil && (lim.Count != nil || lim.LimitAll)
 }
 
 // defaultValues reports whether an INSERT is the "DEFAULT VALUES" form, which
@@ -111,15 +147,63 @@ func fillSelectBody(st *analyzer.Statement, sel tree.SelectStatement) {
 	case *tree.ParenSelect:
 		if c.Select != nil {
 			st.HasOrderBy = st.HasOrderBy || len(c.Select.OrderBy) > 0
-			st.HasLimit = st.HasLimit || c.Select.Limit != nil
+			st.HasLimit = st.HasLimit || hasRowLimit(c.Select.Limit)
 			if v := offsetValue(c.Select.Limit); v > st.OffsetValue {
 				st.OffsetValue = v
 			}
 			fillSelectBody(st, c.Select.Select)
 		}
+	case *tree.UnionClause:
+		mergeArm(st, c.Left)
+		mergeArm(st, c.Right)
 	}
-	// UnionClause / ValuesClause: leave structural defaults; the rules that
-	// matter for those forms don't trigger on set operations.
+	// ValuesClause: no FROM, WHERE or select list to read.
+}
+
+// mergeArm folds one operand of a set operation (UNION / INTERSECT / EXCEPT)
+// into st: a FROM, a star, a DISTINCT or a literal OFFSET in either operand is
+// one in the statement. Its WHERE and LIMIT are left to keepFallbackBounds, and
+// its ORDER BY orders that operand, not the result, so it is not merged.
+func mergeArm(st *analyzer.Statement, arm *tree.Select) {
+	if arm == nil {
+		return
+	}
+	var a analyzer.Statement
+	a.OffsetValue = offsetValue(arm.Limit)
+	fillSelectBody(&a, arm.Select)
+	st.HasFrom = st.HasFrom || a.HasFrom
+	st.SelectStar = st.SelectStar || a.SelectStar
+	st.SelectDistinct = st.SelectDistinct || a.SelectDistinct
+	st.OffsetValue = max(st.OffsetValue, a.OffsetValue)
+}
+
+// isSetOperation reports whether a select body is a UNION / INTERSECT /
+// EXCEPT, looking through parentheses around the whole of it.
+func isSetOperation(sel tree.SelectStatement) bool {
+	for {
+		switch c := sel.(type) {
+		case *tree.UnionClause:
+			return true
+		case *tree.ParenSelect:
+			if c.Select == nil {
+				return false
+			}
+			sel = c.Select.Select
+		default:
+			return false
+		}
+	}
+}
+
+// keepFallbackBounds takes a set operation's WHERE and LIMIT presence from the
+// fallback, which counts them anywhere in the text — inside an operand's
+// subquery too. Reading them from the operands' top level instead reports
+// select-without-limit on SELECT a FROM t UNION SELECT b FROM (SELECT b FROM u
+// LIMIT 3) s, which the fallback does not, and a parser may only remove
+// findings. A LIMIT on the whole result is still read from the AST.
+func keepFallbackBounds(st, fb *analyzer.Statement) {
+	st.HasWhere = fb.HasWhere
+	st.HasLimit = st.HasLimit || fb.HasLimit
 }
 
 // offsetValue extracts a literal OFFSET as an int, or 0 when there is no limit

@@ -9,6 +9,32 @@ the same version in lockstep.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The dialect parsers no longer drop findings on statements they do not
+  model** ([#81]). `pgparser` and `mysqlparser` cleared every structural
+  field before looking at the AST and refilled them only for
+  `SELECT`/`INSERT`/`UPDATE`/`DELETE`, so anything else the grammar accepted
+  lost what the fallback had found and was still marked `Exact`:
+  `CREATE VIEW v AS SELECT * FROM t`, `CREATE TABLE … AS SELECT *` and
+  `EXPLAIN SELECT *` all lost `select-star`. Those statements now keep the
+  fallback's `Statement` with `Exact == false`. Both parsers also read the
+  row source of `INSERT … SELECT *` now, and read every operand of a
+  `UNION`/`INTERSECT`/`EXCEPT` instead of none of them, so
+  `SELECT * FROM t UNION SELECT * FROM u` reports `select-star` and
+  `select-without-limit` as the fallback does. `mysqlparser` had treated a
+  `UNION` as `StmtOther`.
+- **`pgparser` no longer treats a bare `OFFSET` as a `LIMIT`** ([#82]). The
+  grammar builds a limit node for `OFFSET n` alone, and `HasLimit` was set
+  from the node rather than from a row count, so `select-without-limit` and
+  `orderby-without-limit` never fired on `SELECT a FROM t ORDER BY a OFFSET
+  5000`. `LIMIT ALL` still counts as a limit.
+- The fallback parser reads the `ORDER BY` of a statement wrapped in
+  parentheses, `(SELECT … ORDER BY a)`, as the statement's own, as both
+  grammars do. It read it as a subquery's and missed
+  `orderby-without-limit`, which made `pgparser` report a finding the
+  fallback did not.
+
 ### Security
 
 - **`parsers/pgparser` no longer pulls a six-year-old gRPC stack.**
@@ -26,6 +52,9 @@ the same version in lockstep.
   `image-size`, `js-yaml`, `nanoid`, `joi`, `qs`, `svgo`, `smol-toml`,
   `colord` and `serialize-javascript`. Build-time only — nothing here ships to
   consumers of the Go modules or to readers of the published site.
+
+[#81]: https://github.com/KARTIKrocks/sqlguard/issues/81
+[#82]: https://github.com/KARTIKrocks/sqlguard/issues/82
 
 ## [0.5.0] - 2026-09-25
 

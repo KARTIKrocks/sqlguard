@@ -195,6 +195,12 @@ func TestCheckOrderByWithoutLimit(t *testing.T) {
 		{"window order by", "SELECT row_number() OVER (ORDER BY id) FROM users", false},
 		{"ordered aggregate", "SELECT GROUP_CONCAT(x ORDER BY y) FROM t", false},
 		{"window order by with top-level order by", "SELECT rank() OVER (ORDER BY a) FROM t ORDER BY b", true},
+		// Parentheses around the whole statement are not a subquery.
+		{"parenthesised statement", "(SELECT id FROM users ORDER BY name)", true},
+		{"doubly parenthesised statement", "((SELECT id FROM users ORDER BY name));", true},
+		{"parenthesised statement with limit", "(SELECT id FROM users ORDER BY name LIMIT 10)", false},
+		{"parenthesised union arm", "(SELECT a FROM t ORDER BY a) UNION (SELECT b FROM u)", false},
+		{"subquery order by", "SELECT id FROM (SELECT id FROM users ORDER BY name) s", false},
 	}
 
 	for _, tt := range tests {

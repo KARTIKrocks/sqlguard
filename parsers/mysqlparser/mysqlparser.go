@@ -56,6 +56,59 @@ func (p *Parser) Parse(sql string) (*analyzer.Statement, error) {
 		return st, nil
 	}
 
+	switch n := ast.(type) {
+	case *sqlparser.Select:
+		resetStructural(st)
+		st.Kind = analyzer.StmtSelect
+		fillSelect(st, n, true)
+	case *sqlparser.Union:
+		fb := *st
+		resetStructural(st)
+		st.Kind = analyzer.StmtSelect
+		fillSelect(st, n, true)
+		keepFallbackBounds(st, &fb)
+	case *sqlparser.Delete:
+		resetStructural(st)
+		st.Kind = analyzer.StmtDelete
+		st.HasWhere = n.Where != nil
+		st.HasLimit = hasRowLimit(n.Limit)
+		st.HasOrderBy = len(n.OrderBy) > 0
+		st.OffsetValue = offsetValue(n.Limit)
+	case *sqlparser.Update:
+		resetStructural(st)
+		st.Kind = analyzer.StmtUpdate
+		st.HasWhere = n.Where != nil
+		st.HasLimit = hasRowLimit(n.Limit)
+		st.HasOrderBy = len(n.OrderBy) > 0
+		st.OffsetValue = offsetValue(n.Limit)
+	case *sqlparser.Insert:
+		resetStructural(st)
+		st.Kind = analyzer.StmtInsert
+		st.InsertColumnsListed = len(n.Columns) > 0
+		// INSERT ... SELECT * copies columns by position, so a star in the
+		// row source is the select-star case, not an incidental one.
+		if sel, ok := n.Rows.(sqlparser.SelectStatement); ok {
+			var src analyzer.Statement
+			fillSelect(&src, sel, true)
+			st.SelectStar = src.SelectStar
+		}
+	default:
+		// A statement the grammar parsed but this parser does not model
+		// (CREATE VIEW ... AS SELECT, EXPLAIN, DDL, SHOW, ...). Nothing
+		// structural was derived from its AST, so the fallback's facts stand
+		// and the Statement is not Exact. Blanking them instead would silently
+		// drop findings the default parser reports (#81).
+		return st, nil
+	}
+
+	st.Exact = true
+	return st, nil
+}
+
+// resetStructural clears the fields a handled AST node recomputes, so a
+// fallback guess can't survive into a Statement marked Exact. Only called for
+// nodes this parser models; the rest keep the fallback's values.
+func resetStructural(st *analyzer.Statement) {
 	st.Kind = analyzer.StmtOther
 	st.HasWhere = false
 	st.HasLimit = false
@@ -65,40 +118,65 @@ func (p *Parser) Parse(sql string) (*analyzer.Statement, error) {
 	st.SelectDistinct = false
 	st.OffsetValue = 0
 	st.InsertColumnsListed = false
+}
 
-	switch n := ast.(type) {
+// hasRowLimit reports whether a limit clause bounds the row count, mirroring
+// pgparser. MySQL has no bare OFFSET (the grammar rejects it and the fallback
+// takes over), so today every Limit node carries a Rowcount; the check keeps
+// the two parsers answering the same question.
+func hasRowLimit(lim *sqlparser.Limit) bool {
+	return lim != nil && lim.Rowcount != nil
+}
+
+// fillSelect folds a SELECT, a parenthesised SELECT or a set operation into
+// st. top is false for the operands of a set operation: a FROM, a star, a
+// DISTINCT or a literal OFFSET in either operand is one in the statement, but
+// an operand's ORDER BY orders that operand rather than the result, and its
+// WHERE and LIMIT are left to keepFallbackBounds.
+func fillSelect(st *analyzer.Statement, sel sqlparser.SelectStatement, top bool) {
+	switch s := sel.(type) {
 	case *sqlparser.Select:
-		st.Kind = analyzer.StmtSelect
-		st.HasWhere = n.Where != nil
-		st.HasLimit = n.Limit != nil
-		st.HasOrderBy = len(n.OrderBy) > 0
-		st.HasFrom = hasRealFrom(n.From)
-		st.SelectDistinct = n.Distinct != ""
-		st.OffsetValue = offsetValue(n.Limit)
-		for _, e := range n.SelectExprs {
-			if _, ok := e.(*sqlparser.StarExpr); ok { // '*' or 'table.*'
-				st.SelectStar = true
-			}
+		if top {
+			st.HasWhere = s.Where != nil
+			st.HasLimit = hasRowLimit(s.Limit)
+			st.HasOrderBy = len(s.OrderBy) > 0
 		}
-	case *sqlparser.Delete:
-		st.Kind = analyzer.StmtDelete
-		st.HasWhere = n.Where != nil
-		st.HasLimit = n.Limit != nil
-		st.HasOrderBy = len(n.OrderBy) > 0
-		st.OffsetValue = offsetValue(n.Limit)
-	case *sqlparser.Update:
-		st.Kind = analyzer.StmtUpdate
-		st.HasWhere = n.Where != nil
-		st.HasLimit = n.Limit != nil
-		st.HasOrderBy = len(n.OrderBy) > 0
-		st.OffsetValue = offsetValue(n.Limit)
-	case *sqlparser.Insert:
-		st.Kind = analyzer.StmtInsert
-		st.InsertColumnsListed = len(n.Columns) > 0
+		st.HasFrom = st.HasFrom || hasRealFrom(s.From)
+		st.SelectDistinct = st.SelectDistinct || s.Distinct != ""
+		st.SelectStar = st.SelectStar || hasStar(s.SelectExprs)
+		st.OffsetValue = max(st.OffsetValue, offsetValue(s.Limit))
+	case *sqlparser.ParenSelect:
+		fillSelect(st, s.Select, top)
+	case *sqlparser.Union:
+		if top {
+			st.HasLimit = hasRowLimit(s.Limit)
+			st.HasOrderBy = len(s.OrderBy) > 0
+		}
+		st.OffsetValue = max(st.OffsetValue, offsetValue(s.Limit))
+		fillSelect(st, s.Left, false)
+		fillSelect(st, s.Right, false)
 	}
+}
 
-	st.Exact = true
-	return st, nil
+// keepFallbackBounds takes a set operation's WHERE and LIMIT presence from the
+// fallback, which counts them anywhere in the text — inside an operand's
+// subquery too. Reading them from the operands' top level instead reports
+// select-without-limit on SELECT a FROM t UNION SELECT b FROM (SELECT b FROM u
+// LIMIT 3) s, which the fallback does not, and a parser may only remove
+// findings. A LIMIT on the whole result is still read from the AST.
+func keepFallbackBounds(st, fb *analyzer.Statement) {
+	st.HasWhere = fb.HasWhere
+	st.HasLimit = st.HasLimit || fb.HasLimit
+}
+
+// hasStar reports whether a select list contains '*' or 'table.*'.
+func hasStar(exprs sqlparser.SelectExprs) bool {
+	for _, e := range exprs {
+		if _, ok := e.(*sqlparser.StarExpr); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // offsetValue extracts a literal OFFSET as an int, or 0 when there is no limit

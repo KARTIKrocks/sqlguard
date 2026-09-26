@@ -1,6 +1,7 @@
 package pgparser
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -91,6 +92,39 @@ func TestParser_ExactStructuralFacts(t *testing.T) {
 			sql:  "SELECT id FROM users WHERE x = 1 LIMIT 10 OFFSET $1",
 			want: analyzer.Statement{Kind: analyzer.StmtSelect, HasFrom: true, HasWhere: true, HasLimit: true, Exact: true},
 		},
+		{
+			// The grammar builds a Limit node for a bare OFFSET; it bounds
+			// nothing, so HasLimit must stay false (#82).
+			name: "offset without limit is unbounded",
+			sql:  "SELECT a FROM t ORDER BY a OFFSET 5000",
+			want: analyzer.Statement{Kind: analyzer.StmtSelect, HasFrom: true, HasOrderBy: true, OffsetValue: 5000, Exact: true},
+		},
+		{
+			name: "parenthesised offset without limit is unbounded",
+			sql:  "(SELECT a FROM t ORDER BY a OFFSET 5)",
+			want: analyzer.Statement{Kind: analyzer.StmtSelect, HasFrom: true, HasOrderBy: true, OffsetValue: 5, Exact: true},
+		},
+		{
+			// An explicit opt-out; the fallback reads it as a LIMIT too.
+			name: "limit all counts as a limit",
+			sql:  "SELECT a FROM t ORDER BY a LIMIT ALL",
+			want: analyzer.Statement{Kind: analyzer.StmtSelect, HasFrom: true, HasOrderBy: true, HasLimit: true, Exact: true},
+		},
+		{
+			name: "insert select star",
+			sql:  "INSERT INTO t (a) SELECT * FROM u",
+			want: analyzer.Statement{Kind: analyzer.StmtInsert, InsertColumnsListed: true, SelectStar: true, Exact: true},
+		},
+		{
+			name: "cte-prefixed insert select star",
+			sql:  "WITH c AS (SELECT 1 AS n) INSERT INTO t (a) SELECT * FROM c",
+			want: analyzer.Statement{Kind: analyzer.StmtInsert, InsertColumnsListed: true, SelectStar: true, Exact: true},
+		},
+		{
+			name: "insert values has no star",
+			sql:  "INSERT INTO t (a) VALUES (1)",
+			want: analyzer.Statement{Kind: analyzer.StmtInsert, InsertColumnsListed: true, Exact: true},
+		},
 	}
 
 	for _, tt := range tests {
@@ -141,6 +175,65 @@ func TestParser_IntegratesWithAnalyzer(t *testing.T) {
 
 	if r := a.Analyze("SELECT id FROM users WHERE id = 1 LIMIT 1"); len(r) != 0 {
 		t.Errorf("expected no findings for safe query, got %+v", r)
+	}
+}
+
+// TestParser_KeepsFallbackFactsForUnmodelledStatements pins the other half of
+// the parity contract: a statement the grammar parses but this parser has no
+// case for derives nothing from its AST, so it must come back exactly as the
+// fallback built it, not Exact. Blanking the structural fields there dropped
+// select-star from CREATE VIEW ... AS SELECT * and its kin (#81).
+func TestParser_KeepsFallbackFactsForUnmodelledStatements(t *testing.T) {
+	for _, sql := range []string{
+		"CREATE VIEW v AS SELECT * FROM t",
+		"CREATE TABLE c AS SELECT * FROM t",
+		"CREATE TABLE c AS SELECT a FROM t ORDER BY a",
+		"EXPLAIN SELECT * FROM t",
+		"ALTER TABLE t ADD COLUMN c INT NOT NULL",
+		"CREATE TABLE t (id INT)",
+		"SET search_path = public",
+	} {
+		t.Run(sql, func(t *testing.T) {
+			want, _ := analyzer.NewFallbackParser().Parse(sql)
+			got, err := New().Parse(sql)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Errorf("Parse(%q)\n got: %+v\nwant: %+v", sql, *got, *want)
+			}
+		})
+	}
+}
+
+// TestParser_KeepsFindingsTheGrammarHasNoReasonToDrop pins specific findings
+// the grammar once dropped without having derived anything that disproves them.
+func TestParser_KeepsFindingsTheGrammarHasNoReasonToDrop(t *testing.T) {
+	a := analyzer.Default().WithParser(New())
+	tests := []struct {
+		sql  string
+		want []string
+	}{
+		{"CREATE VIEW v AS SELECT * FROM t", []string{"select-star"}},  // #81
+		{"CREATE TABLE c AS SELECT * FROM t", []string{"select-star"}}, // #81
+		{"EXPLAIN SELECT * FROM t", []string{"select-star"}},           // #81
+		{"INSERT INTO t (a) SELECT * FROM u", []string{"select-star"}}, // #81
+		{"SELECT * FROM t UNION SELECT * FROM u", []string{"select-star", "select-without-limit"}},
+		{"SELECT a FROM t UNION SELECT b FROM u ORDER BY a", []string{"orderby-without-limit", "select-without-limit"}},
+		{"INSERT INTO t (a) SELECT * FROM u UNION SELECT * FROM v", []string{"select-star"}},
+		{"WITH c AS (SELECT 1 AS n) INSERT INTO t (a) SELECT * FROM c", []string{"select-star"}},                              // #81
+		{"SELECT a FROM t OFFSET 100", []string{"select-without-limit"}},                                                      // #82
+		{"SELECT a FROM t ORDER BY a OFFSET 5000", []string{"large-offset", "orderby-without-limit", "select-without-limit"}}, // #82
+	}
+	for _, tt := range tests {
+		t.Run(tt.sql, func(t *testing.T) {
+			got := ruleSet(a.Analyze(tt.sql))
+			for _, name := range tt.want {
+				if _, ok := got[name]; !ok {
+					t.Errorf("missing %q, got %v", name, got)
+				}
+			}
+		})
 	}
 }
 
@@ -207,16 +300,37 @@ func TestParser_NeverAddsFindingTheFallbackDoesNot(t *testing.T) {
 		"VALUES (1), (2)",
 		"SELECT t.* FROM t",
 		"SELECT * FROM t LIMIT 1 OFFSET 2000",
+		"SELECT a FROM t OFFSET 100",
+		"SELECT a FROM t ORDER BY a LIMIT ALL",
+		"(SELECT a FROM t ORDER BY a)",
+		"(SELECT a FROM t ORDER BY a OFFSET 5)",
+		"(SELECT a FROM t ORDER BY a LIMIT 5)",
+		"SELECT a FROM t UNION SELECT b FROM u ORDER BY a",
+		"SELECT * FROM t UNION SELECT * FROM u",
+		"SELECT a FROM t WHERE x = 1 UNION SELECT b FROM u",
+		"SELECT a FROM t UNION SELECT b FROM (SELECT b FROM u LIMIT 3) s",
+		"SELECT a FROM t UNION SELECT b FROM (SELECT b FROM u WHERE x = 1) s",
+		"SELECT a FROM t UNION SELECT b FROM u WHERE b IN (SELECT c FROM v LIMIT 1) ORDER BY a",
+		"INSERT INTO t (a) SELECT * FROM u UNION SELECT * FROM v",
+		"INSERT INTO t (a) SELECT * FROM u",
+		"WITH c AS (SELECT 1 AS n) INSERT INTO t (a) SELECT * FROM c",
+		"CREATE VIEW v AS SELECT * FROM t",
+		"CREATE TABLE c AS SELECT a FROM t ORDER BY a",
+		"EXPLAIN SELECT * FROM t",
 	}
 
 	fallback := analyzer.Default()
 	exact := analyzer.Default().WithParser(New())
 	coreKnows := fallbackKnowsInsertLikeKeywords()
+	coreUnwraps := fallbackUnwrapsStatementParens()
 
 	for _, sql := range corpus {
 		t.Run(sql, func(t *testing.T) {
 			if !coreKnows && needsCoreKeywordSupport(sql) {
 				t.Skip("linked core predates the fallback's row-inserting keyword support")
+			}
+			if !coreUnwraps && strings.HasPrefix(sql, "(") {
+				t.Skip("linked core predates the fallback reading a parenthesised statement's ORDER BY")
 			}
 			base := ruleSet(fallback.Analyze(sql))
 			for name := range ruleSet(exact.Analyze(sql)) {
@@ -262,4 +376,13 @@ func ruleSet(rs []analyzer.Result) map[string]struct{} {
 func fallbackKnowsInsertLikeKeywords() bool {
 	st, _ := analyzer.NewFallbackParser().Parse("REPLACE INTO t VALUES (1)")
 	return st.Kind == analyzer.StmtInsert
+}
+
+// fallbackUnwrapsStatementParens reports whether the linked core reads the
+// ORDER BY of a statement wrapped in parentheses as the statement's own, as the
+// grammar does. Skipped against an older core for the same reason as
+// fallbackKnowsInsertLikeKeywords.
+func fallbackUnwrapsStatementParens() bool {
+	st, _ := analyzer.NewFallbackParser().Parse("(SELECT a FROM t ORDER BY a)")
+	return st.HasOrderBy
 }
