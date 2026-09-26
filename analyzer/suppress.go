@@ -15,7 +15,7 @@ var ignoreTokenRe = regexp.MustCompile(`(?i)sqlguard:ignore(?::\s*([a-z0-9_,\s-]
 // dialects disagree about where literals and comments start, so a directive
 // counts only if every reading agrees it is not inside a literal.
 func parseIgnoreDirective(sql string) (ignoreAll bool, ignored map[string]bool) {
-	if !strings.Contains(strings.ToLower(sql), "sqlguard:ignore") {
+	if !containsFold(sql, "sqlguard:ignore") {
 		return false, nil
 	}
 	first := true
@@ -176,4 +176,15 @@ func ParseIgnoreComment(text string) (all bool, rules map[string]bool, found boo
 		}
 	}
 	return false, rules, true
+}
+
+// containsFold is a case-insensitive strings.Contains for an ASCII needle that
+// does not allocate; it runs on every analyzed query.
+func containsFold(s, needle string) bool {
+	for i := 0; i+len(needle) <= len(s); i++ {
+		if s[i]|0x20 == needle[0] && strings.EqualFold(s[i:i+len(needle)], needle) {
+			return true
+		}
+	}
+	return false
 }

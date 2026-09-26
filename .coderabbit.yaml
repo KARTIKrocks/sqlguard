@@ -94,10 +94,11 @@ reviews:
         parseIgnoreDirective lexes the SQL and matches the directive only in
         comment text, because a regex anchored on a comment marker also matched
         '-- sqlguard:ignore' inside a user-supplied string and switched every
-        rule off (#66). It runs every dialect reading and honors a directive only
-        where ALL agree it is in a comment — a spurious suppression hides
+        rule off (#66). It runs every backslash/$$ literal reading and honors a
+        directive only where ALL agree it is in a comment — a spurious suppression hides
         findings, a missed one only reports one. # (XOR in Postgres) and a
-        MySQL -- without trailing whitespace must not reach into a literal.
+        MySQL -- without trailing whitespace must not reach into a literal, but
+        a genuine # sqlguard:ignore comment still counts.
         Flag a change that matches raw
         SQL again, drops a reading, unions them, or treats // as a SQL comment.
 

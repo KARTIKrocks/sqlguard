@@ -74,3 +74,10 @@ func TestIgnoreDirectiveInLiteralDoesNotSuppress(t *testing.T) {
 		t.Errorf("select-star reported %d times on %q, want 1", got, q)
 	}
 }
+
+func TestParseIgnoreDirectiveNoDirectiveDoesNotAllocate(t *testing.T) {
+	q := "SELECT * FROM users WHERE id = 1 AND name = 'Alice'"
+	if n := testing.AllocsPerRun(100, func() { parseIgnoreDirective(q) }); n != 0 {
+		t.Errorf("parseIgnoreDirective allocated %v times on a query without a directive", n)
+	}
+}
