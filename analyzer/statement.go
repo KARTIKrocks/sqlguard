@@ -146,6 +146,9 @@ type Statement struct {
 	// ImplicitCommaJoin, CartesianJoin, and the literal/text-level fields
 	// (LeadingWildcard*, NonSargablePredicate, AddNotNullNoDefault) — because
 	// they read literal values the AST discards or are intentionally text-level.
-	// Each such field documents this.
+	// Each such field documents this. For a set operation (UNION / INTERSECT /
+	// EXCEPT) HasWhere and HasLimit are taken from the fallback too, which
+	// counts a WHERE or LIMIT anywhere in the text, so the grammar can never
+	// report select-without-limit where the default parser does not.
 	Exact bool
 }

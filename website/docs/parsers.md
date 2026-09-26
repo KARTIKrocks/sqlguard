@@ -74,12 +74,19 @@ Neither parser uses cgo.
 The first group is the false-positive-prone set; those become exact
 (`Statement.Exact == true`) for the statements each parser models:
 `SELECT` (including set operations), `INSERT`, `UPDATE` and `DELETE`.
+The rest stay best-effort heuristics regardless of the parser, and each
+field's doc comment says so. This is a documented carve-out, not a gap
+waiting to be closed.
+
+For a set operation (`UNION`, `INTERSECT`, `EXCEPT`), `HasWhere` and
+`HasLimit` also stay lexical: the fallback counts a `WHERE` or `LIMIT`
+anywhere, including inside an operand's subquery, and reading them per
+operand would report findings the fallback does not.
+
 _Changed in 0.6._ A statement the grammar accepts but the parser does not
 model — DDL, `EXPLAIN`, `CREATE VIEW … AS SELECT` — keeps the fallback's
-facts and `Exact == false`; before, every structural field on it was
-cleared and the statement was still marked exact. The rest stay best-effort heuristics
-regardless of the parser, and each field's doc comment says so. This is a
-documented carve-out, not a gap waiting to be closed.
+facts and `Exact == false`. Before, every structural field on it was
+cleared and the statement was still marked exact.
 
 _Added in 0.5._ **A dialect parser is meant to remove findings, never add
 them.** Opting in can drop a finding the heuristics guessed wrong; it
