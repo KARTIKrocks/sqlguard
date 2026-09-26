@@ -5,43 +5,153 @@ import (
 	"strings"
 )
 
-// ignoreDirectiveRe matches a sqlguard:ignore directive inside a SQL or Go
-// comment. The leading comment marker (--, /*, #, //) anchors it so the
-// token is honored only in comment context, not when the literal text
-// happens to appear inside a string. An optional `:rule-a, rule-b` list
-// scopes the suppression to specific rules; without it, all rules are
-// suppressed for the statement.
-var ignoreDirectiveRe = regexp.MustCompile(`(?i)(?:--|/\*|#|//)[^\n]*?sqlguard:ignore(?::\s*([a-z0-9_,\s-]+))?`)
-
-// ignoreTokenRe matches the bare directive in text that is already known to
-// be a comment (e.g. go/ast comment text with the marker stripped). No
-// comment marker is required here because the whole string is comment
-// context.
+// ignoreTokenRe matches a directive in text already known to be a comment.
+// An optional `:rule-a, rule-b` list scopes it; without one, every rule is
+// suppressed.
 var ignoreTokenRe = regexp.MustCompile(`(?i)sqlguard:ignore(?::\s*([a-z0-9_,\s-]+))?`)
 
-// parseIgnoreDirective scans raw SQL for `sqlguard:ignore` directives.
-// It returns ignoreAll=true if any directive has no rule list, otherwise a
-// set of rule names to suppress. The result is empty when no directive is
-// present, so the common path allocates nothing.
+// parseIgnoreDirective finds `sqlguard:ignore` directives in the comments of
+// raw SQL. Text inside a value must never switch a rule off (#66), and
+// dialects disagree about where literals and comments start, so a directive
+// counts only if every reading agrees it is not inside a literal.
 func parseIgnoreDirective(sql string) (ignoreAll bool, ignored map[string]bool) {
-	if !strings.Contains(strings.ToLower(sql), "sqlguard:ignore") {
+	if !containsFold(sql, "sqlguard:ignore") {
 		return false, nil
 	}
-	for _, m := range ignoreDirectiveRe.FindAllStringSubmatch(sql, -1) {
-		list := strings.TrimSpace(m[1])
-		if list == "" {
-			return true, nil
+	first := true
+	for _, backslash := range []bool{false, true} {
+		if backslash && strings.IndexByte(sql, '\\') < 0 {
+			continue
 		}
-		if ignored == nil {
-			ignored = make(map[string]bool)
+		for _, dollar := range []bool{true, false} {
+			if !dollar && strings.IndexByte(sql, '$') < 0 {
+				continue
+			}
+			all, rules := commentDirective(sql, backslash, dollar)
+			if first {
+				ignoreAll, ignored, first = all, rules, false
+				continue
+			}
+			ignoreAll, ignored = intersectDirectives(ignoreAll, ignored, all, rules)
 		}
-		for name := range strings.SplitSeq(list, ",") {
-			if name = strings.TrimSpace(name); name != "" {
-				ignored[name] = true
+	}
+	return ignoreAll, ignored
+}
+
+// commentDirective collects the directives in sql's comments under one
+// literal reading. Comments are found with every marker any dialect accepts;
+// a directive is dropped if any combination of the dialect-dependent markers
+// (# is XOR in Postgres; MySQL's -- needs trailing whitespace) puts it inside
+// a literal.
+func commentDirective(sql string, backslash, dollar bool) (all bool, rules map[string]bool) {
+	comments, _ := lexSQL(sql, backslash, dollar, true, true)
+	literals := make([][]span, 0, 4)
+	for _, hash := range []bool{true, false} {
+		for _, looseDash := range []bool{true, false} {
+			_, lits := lexSQL(sql, backslash, dollar, hash, looseDash)
+			literals = append(literals, lits)
+		}
+	}
+	for _, c := range comments {
+		for _, m := range ignoreTokenRe.FindAllStringSubmatchIndex(sql[c.lo:c.hi], -1) {
+			if inAnySpans(literals, c.lo+m[0]) {
+				continue
+			}
+			list := ""
+			if m[2] >= 0 {
+				list = strings.TrimSpace(sql[c.lo+m[2] : c.lo+m[3]])
+			}
+			if list == "" {
+				return true, nil
+			}
+			if rules == nil {
+				rules = make(map[string]bool)
+			}
+			for name := range strings.SplitSeq(list, ",") {
+				if name = strings.TrimSpace(name); name != "" {
+					rules[name] = true
+				}
 			}
 		}
 	}
-	return false, ignored
+	return false, rules
+}
+
+// lexSQL returns the comment and literal spans of sql under one reading. hash
+// makes # a comment; looseDash makes -- one without trailing whitespace.
+func lexSQL(sql string, backslash, dollar, hash, looseDash bool) (comments, literals []span) {
+	for i := 0; i < len(sql); {
+		c := sql[i]
+		switch {
+		case c == '\'' || c == '"' || c == '`':
+			j := scanQuotedRun(sql, i, backslash && c != '`')
+			literals = append(literals, span{i, j})
+			i = j
+		case c == '$' && dollar:
+			j, _, ok := scanDollarQuoted(sql, i)
+			if !ok {
+				i++
+				continue
+			}
+			literals = append(literals, span{i, j})
+			i = j
+		case isLineComment(sql, i, hash, looseDash):
+			j := skipLineComment(sql, i)
+			comments = append(comments, span{i, j})
+			i = j
+		case c == '/' && i+1 < len(sql) && sql[i+1] == '*':
+			j := min(skipBlockComment(sql, i), len(sql))
+			comments = append(comments, span{i, j})
+			i = j
+		default:
+			i++
+		}
+	}
+	return comments, literals
+}
+
+// isLineComment reports whether a -- or # comment starts at sql[i].
+func isLineComment(sql string, i int, hash, looseDash bool) bool {
+	if sql[i] == '#' {
+		return hash
+	}
+	if sql[i] != '-' || i+1 >= len(sql) || sql[i+1] != '-' {
+		return false
+	}
+	return looseDash || i+2 >= len(sql) || sql[i+2] <= ' '
+}
+
+func inAnySpans(readings [][]span, pos int) bool {
+	for _, spans := range readings {
+		for _, s := range spans {
+			if pos >= s.lo && pos < s.hi {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// intersectDirectives keeps what both readings suppress.
+func intersectDirectives(aAll bool, a map[string]bool, bAll bool, b map[string]bool) (bool, map[string]bool) {
+	switch {
+	case aAll && bAll:
+		return true, nil
+	case aAll:
+		return false, b
+	case bAll:
+		return false, a
+	}
+	var out map[string]bool
+	for name := range a {
+		if b[name] {
+			if out == nil {
+				out = make(map[string]bool)
+			}
+			out[name] = true
+		}
+	}
+	return false, out
 }
 
 // ParseIgnoreComment parses the text of a single comment for a
@@ -66,4 +176,15 @@ func ParseIgnoreComment(text string) (all bool, rules map[string]bool, found boo
 		}
 	}
 	return false, rules, true
+}
+
+// containsFold is a case-insensitive strings.Contains for an ASCII needle that
+// does not allocate; it runs on every analyzed query.
+func containsFold(s, needle string) bool {
+	for i := 0; i+len(needle) <= len(s); i++ {
+		if s[i]|0x20 == needle[0] && strings.EqualFold(s[i:i+len(needle)], needle) {
+			return true
+		}
+	}
+	return false
 }
