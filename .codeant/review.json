@@ -19,6 +19,12 @@
       "scope": ["pr", "ide"]
     },
     {
+      "id": "suppression-comment-only",
+      "description": "An in-SQL sqlguard:ignore directive (-- , /* */ or #) must be honored only inside a comment span, never inside a string literal, quoted identifier or dollar-quoted body. parseIgnoreDirective lexes the SQL and matches ignoreTokenRe only against comment text; matching raw SQL with a regex anchored on a comment marker is not enough, because the marker can itself sit inside a string - a user-supplied value of '-- sqlguard:ignore' switched every rule off (#66). Where a comment starts depends on where each literal ends, so it runs every dialect reading (backslash escapes on/off, $$ as a delimiter or not) and honors a directive only where ALL readings put it in a comment (intersectDirectives): a spurious suppression hides findings, a missed one only reports a finding. Comment markers are dialect-dependent too (# is XOR in Postgres; MySQL's -- needs trailing whitespace), so a directive found in a comment is still dropped if the strict markers put it inside a literal. This is the opposite side from Redact's union, on purpose. Flag a change that matches the directive against raw SQL again, drops a reading, unions the readings, or treats // as a SQL comment. ParseIgnoreComment (Go source) may use the marker-less regex because go/ast has already stripped the //. TestParseIgnoreDirective pins the literal and dialect-ambiguous cases.",
+      "files": ["analyzer/suppress.go", "analyzer/fallback.go", "analyzer/redact.go", "analyzer/*_test.go"],
+      "scope": ["pr", "ide"]
+    },
+    {
       "id": "single-analysis-core",
       "description": "middleware.Guard (Check / CheckLatency / Observe / ResetN1 / Analyzer) is the single analysis core. Every interception point in the driver chain and every out-of-tree integration must route through one Guard; integrations/pgxguard is the reference example. Flag any hand-rolled check or latency logic that bypasses it - that shape silently loses redaction-by-default, fingerprints, the parser seam, file config, N+1, dedup and the analysis cache. Per-query work must stay allocation-light and config-free: enable/disable, severity and settings are resolved once in NewGuard and DefaultWithProfile, never per query.",
       "files": ["middleware/**/*.go", "integrations/**/*.go"],

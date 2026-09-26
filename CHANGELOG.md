@@ -11,6 +11,17 @@ the same version in lockstep.
 
 ### Fixed
 
+- **A `sqlguard:ignore` inside a string literal no longer suppresses
+  anything** ([#66]). The in-SQL directive only had to follow a comment
+  marker somewhere earlier in the text, and the marker could itself be inside
+  a string, so `SELECT * FROM users WHERE note = '-- sqlguard:ignore'`
+  reported nothing. Where a query embeds user input, that let a value switch
+  every rule off for the statement. The directive is now matched only inside
+  comment spans. When dialects disagree about where a literal ends
+  (backslash escapes, `$$`), it counts only if every reading places it in a
+  comment, and a `#` (XOR in PostgreSQL) or a MySQL `--` without trailing
+  whitespace cannot reach into a literal. `//` inside SQL text, which was never a SQL comment, is no longer
+  honored.
 - **The dialect parsers no longer drop findings on statements they do not
   model** ([#81]). `pgparser` and `mysqlparser` cleared every structural
   field before looking at the AST and refilled them only for
@@ -53,6 +64,7 @@ the same version in lockstep.
   `colord` and `serialize-javascript`. Build-time only — nothing here ships to
   consumers of the Go modules or to readers of the published site.
 
+[#66]: https://github.com/KARTIKrocks/sqlguard/issues/66
 [#81]: https://github.com/KARTIKrocks/sqlguard/issues/81
 [#82]: https://github.com/KARTIKrocks/sqlguard/issues/82
 

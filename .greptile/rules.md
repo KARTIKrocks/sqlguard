@@ -37,19 +37,30 @@ together: `validate()`'s SELECT/WITH-only-by-default policy, never using
 `!dml` back to `true`; if you touch this, `TestMySQL_ExplainDMLDoesNotMutate`
 is the test that would catch a real regression.
 
-## Suppression uses two different regexes on purpose
+## An in-SQL suppression directive counts only inside a comment
 
-`analyzer/suppress.go` has two suppression paths that look like they could
-share a regex but must not: the in-SQL `-- sqlguard:ignore` / `/* sqlguard:
-ignore:rule-a,rule-b */` form is parsed from raw SQL text with a
-**marker-anchored** pattern specifically to avoid a string literal like
-`'-- sqlguard:ignore'` inside a query being mistaken for a real directive. The
-Go-source `// sqlguard:ignore[:rules]` form (`ParseIgnoreComment`) uses a
-**separate, marker-less** pattern because `go/ast` has already stripped the
-`//` by the time this code sees the comment text. Reusing one regex for the
-other either breaks Go-source suppression (the marker-anchored form expects
-the `//`/`/* */` delimiters still present) or reopens the string-literal false
-positive in SQL.
+`analyzer/suppress.go` honors `-- sqlguard:ignore`, `/* sqlguard:ignore:rule-a,
+rule-b */` and `# sqlguard:ignore` in SQL, and `// sqlguard:ignore[:rules]` in
+Go source. The SQL form used to be a regex anchored on a preceding comment
+marker, documented as keeping string literals out. It did not: the marker can
+itself be inside the string, so a user-supplied value of
+`'-- sqlguard:ignore'` switched every rule off for that statement (#66).
+
+`parseIgnoreDirective` now lexes the SQL and matches only comment text, skipping
+every quoted run and dollar-quoted body whole. Where a comment starts depends on
+where each literal ends, which dialects disagree about (backslash escapes, and
+whether `$$` opens a string), so it runs every reading and honors a directive
+only where all of them put it in a comment. Comment markers vary too (`#` is XOR in
+Postgres; MySQL's `--` needs trailing whitespace), so a directive in a comment is
+still dropped if the strict markers put it inside a literal. That is the opposite side from
+`Redact`'s union, and deliberately: a spurious suppression hides findings,
+while a missed one merely reports a finding.
+
+Flag a change that matches the directive against raw SQL again, drops a
+reading, turns the intersection into a union, or reads `//` as a SQL comment.
+`ParseIgnoreComment` may use the marker-less token regex because go/ast has
+already reduced its input to comment text. `TestParseIgnoreDirective` holds the
+literal and dialect-ambiguous cases.
 
 ## Redaction is a security invariant, not a formatting choice
 

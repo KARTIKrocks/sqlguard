@@ -34,10 +34,21 @@ query builder untouched.
 
 ### Why it must be in a comment
 
-The directive is matched only when it follows a comment marker. A string
-literal that happens to contain the words — say a support ticket body with
-`'-- sqlguard:ignore'` in it — does not suppress anything. This is a
-deliberate anchoring, not an accident of the regex.
+_Changed in 0.6._ The directive is honored only inside a SQL comment. Text
+inside a string literal, a quoted identifier or a dollar-quoted body is
+never read as one, so a value that happens to contain the words — a support
+ticket body with `'-- sqlguard:ignore'` in it, or user input concatenated
+into the query — suppresses nothing. Before 0.6 the directive only had to
+follow a comment marker, and that marker could itself be inside the string.
+
+Databases disagree about where some literals end, and where comments
+start: whether `\'` escapes a quote, whether `$$` opens a string, whether
+`#` is a comment (it is XOR in PostgreSQL), and whether `--` needs a space
+after it (it does in MySQL). When the answer decides whether a
+directive is in a comment, sqlguard does not suppress. The cost is at most a
+finding a genuine but ambiguous directive failed to silence; the alternative
+would let text inside a value switch rules off. `//` is not a SQL comment,
+so `// sqlguard:ignore` inside SQL text is not honored either.
 
 ## In the Go source
 

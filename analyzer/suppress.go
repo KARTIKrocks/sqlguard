@@ -5,43 +5,147 @@ import (
 	"strings"
 )
 
-// ignoreDirectiveRe matches a sqlguard:ignore directive inside a SQL or Go
-// comment. The leading comment marker (--, /*, #, //) anchors it so the
-// token is honored only in comment context, not when the literal text
-// happens to appear inside a string. An optional `:rule-a, rule-b` list
-// scopes the suppression to specific rules; without it, all rules are
-// suppressed for the statement.
-var ignoreDirectiveRe = regexp.MustCompile(`(?i)(?:--|/\*|#|//)[^\n]*?sqlguard:ignore(?::\s*([a-z0-9_,\s-]+))?`)
-
-// ignoreTokenRe matches the bare directive in text that is already known to
-// be a comment (e.g. go/ast comment text with the marker stripped). No
-// comment marker is required here because the whole string is comment
-// context.
+// ignoreTokenRe matches a directive in text already known to be a comment.
+// An optional `:rule-a, rule-b` list scopes it; without one, every rule is
+// suppressed.
 var ignoreTokenRe = regexp.MustCompile(`(?i)sqlguard:ignore(?::\s*([a-z0-9_,\s-]+))?`)
 
-// parseIgnoreDirective scans raw SQL for `sqlguard:ignore` directives.
-// It returns ignoreAll=true if any directive has no rule list, otherwise a
-// set of rule names to suppress. The result is empty when no directive is
-// present, so the common path allocates nothing.
+// parseIgnoreDirective finds `sqlguard:ignore` directives in the comments of
+// raw SQL. Text inside a value must never switch a rule off (#66), and
+// dialects disagree about where literals and comments start, so a directive
+// counts only if every reading agrees it is not inside a literal.
 func parseIgnoreDirective(sql string) (ignoreAll bool, ignored map[string]bool) {
 	if !strings.Contains(strings.ToLower(sql), "sqlguard:ignore") {
 		return false, nil
 	}
-	for _, m := range ignoreDirectiveRe.FindAllStringSubmatch(sql, -1) {
-		list := strings.TrimSpace(m[1])
-		if list == "" {
-			return true, nil
+	first := true
+	for _, backslash := range []bool{false, true} {
+		if backslash && strings.IndexByte(sql, '\\') < 0 {
+			continue
 		}
-		if ignored == nil {
-			ignored = make(map[string]bool)
+		for _, dollar := range []bool{true, false} {
+			if !dollar && strings.IndexByte(sql, '$') < 0 {
+				continue
+			}
+			all, rules := commentDirective(sql, backslash, dollar)
+			if first {
+				ignoreAll, ignored, first = all, rules, false
+				continue
+			}
+			ignoreAll, ignored = intersectDirectives(ignoreAll, ignored, all, rules)
 		}
-		for name := range strings.SplitSeq(list, ",") {
-			if name = strings.TrimSpace(name); name != "" {
-				ignored[name] = true
+	}
+	return ignoreAll, ignored
+}
+
+// commentDirective collects the directives in sql's comments under one
+// literal reading. Comments are found with every marker any dialect accepts;
+// a directive is then dropped if the strict markers (no #, MySQL's "-- " that
+// needs trailing whitespace) put it inside a literal, as with Postgres'
+// "a # b" XOR or MySQL's "1--'x'".
+func commentDirective(sql string, backslash, dollar bool) (all bool, rules map[string]bool) {
+	comments, _ := lexSQL(sql, backslash, dollar, false)
+	_, literals := lexSQL(sql, backslash, dollar, true)
+	for _, c := range comments {
+		for _, m := range ignoreTokenRe.FindAllStringSubmatchIndex(sql[c.lo:c.hi], -1) {
+			if inSpans(literals, c.lo+m[0]) {
+				continue
+			}
+			list := ""
+			if m[2] >= 0 {
+				list = strings.TrimSpace(sql[c.lo+m[2] : c.lo+m[3]])
+			}
+			if list == "" {
+				return true, nil
+			}
+			if rules == nil {
+				rules = make(map[string]bool)
+			}
+			for name := range strings.SplitSeq(list, ",") {
+				if name = strings.TrimSpace(name); name != "" {
+					rules[name] = true
+				}
 			}
 		}
 	}
-	return false, ignored
+	return false, rules
+}
+
+// lexSQL returns the comment and literal spans of sql under one reading.
+// strict limits comment markers to those every dialect agrees on.
+func lexSQL(sql string, backslash, dollar, strict bool) (comments, literals []span) {
+	for i := 0; i < len(sql); {
+		c := sql[i]
+		switch {
+		case c == '\'' || c == '"' || c == '`':
+			j := scanQuotedRun(sql, i, backslash && c != '`')
+			literals = append(literals, span{i, j})
+			i = j
+		case c == '$' && dollar:
+			j, _, ok := scanDollarQuoted(sql, i)
+			if !ok {
+				i++
+				continue
+			}
+			literals = append(literals, span{i, j})
+			i = j
+		case isLineComment(sql, i, strict):
+			j := skipLineComment(sql, i)
+			comments = append(comments, span{i, j})
+			i = j
+		case c == '/' && i+1 < len(sql) && sql[i+1] == '*':
+			j := min(skipBlockComment(sql, i), len(sql))
+			comments = append(comments, span{i, j})
+			i = j
+		default:
+			i++
+		}
+	}
+	return comments, literals
+}
+
+// isLineComment reports whether a -- or # comment starts at sql[i]. Strictly,
+// # is not a comment (Postgres XOR) and -- needs a following space or control
+// byte (MySQL).
+func isLineComment(sql string, i int, strict bool) bool {
+	if sql[i] == '#' {
+		return !strict
+	}
+	if sql[i] != '-' || i+1 >= len(sql) || sql[i+1] != '-' {
+		return false
+	}
+	return !strict || i+2 >= len(sql) || sql[i+2] <= ' '
+}
+
+func inSpans(spans []span, pos int) bool {
+	for _, s := range spans {
+		if pos >= s.lo && pos < s.hi {
+			return true
+		}
+	}
+	return false
+}
+
+// intersectDirectives keeps what both readings suppress.
+func intersectDirectives(aAll bool, a map[string]bool, bAll bool, b map[string]bool) (bool, map[string]bool) {
+	switch {
+	case aAll && bAll:
+		return true, nil
+	case aAll:
+		return false, b
+	case bAll:
+		return false, a
+	}
+	var out map[string]bool
+	for name := range a {
+		if b[name] {
+			if out == nil {
+				out = make(map[string]bool)
+			}
+			out[name] = true
+		}
+	}
+	return false, out
 }
 
 // ParseIgnoreComment parses the text of a single comment for a
