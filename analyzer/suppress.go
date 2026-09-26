@@ -40,15 +40,21 @@ func parseIgnoreDirective(sql string) (ignoreAll bool, ignored map[string]bool) 
 
 // commentDirective collects the directives in sql's comments under one
 // literal reading. Comments are found with every marker any dialect accepts;
-// a directive is then dropped if the strict markers (no #, MySQL's "-- " that
-// needs trailing whitespace) put it inside a literal, as with Postgres'
-// "a # b" XOR or MySQL's "1--'x'".
+// a directive is dropped if any combination of the dialect-dependent markers
+// (# is XOR in Postgres; MySQL's -- needs trailing whitespace) puts it inside
+// a literal.
 func commentDirective(sql string, backslash, dollar bool) (all bool, rules map[string]bool) {
-	comments, _ := lexSQL(sql, backslash, dollar, false)
-	_, literals := lexSQL(sql, backslash, dollar, true)
+	comments, _ := lexSQL(sql, backslash, dollar, true, true)
+	literals := make([][]span, 0, 4)
+	for _, hash := range []bool{true, false} {
+		for _, looseDash := range []bool{true, false} {
+			_, lits := lexSQL(sql, backslash, dollar, hash, looseDash)
+			literals = append(literals, lits)
+		}
+	}
 	for _, c := range comments {
 		for _, m := range ignoreTokenRe.FindAllStringSubmatchIndex(sql[c.lo:c.hi], -1) {
-			if inSpans(literals, c.lo+m[0]) {
+			if inAnySpans(literals, c.lo+m[0]) {
 				continue
 			}
 			list := ""
@@ -71,9 +77,9 @@ func commentDirective(sql string, backslash, dollar bool) (all bool, rules map[s
 	return false, rules
 }
 
-// lexSQL returns the comment and literal spans of sql under one reading.
-// strict limits comment markers to those every dialect agrees on.
-func lexSQL(sql string, backslash, dollar, strict bool) (comments, literals []span) {
+// lexSQL returns the comment and literal spans of sql under one reading. hash
+// makes # a comment; looseDash makes -- one without trailing whitespace.
+func lexSQL(sql string, backslash, dollar, hash, looseDash bool) (comments, literals []span) {
 	for i := 0; i < len(sql); {
 		c := sql[i]
 		switch {
@@ -89,7 +95,7 @@ func lexSQL(sql string, backslash, dollar, strict bool) (comments, literals []sp
 			}
 			literals = append(literals, span{i, j})
 			i = j
-		case isLineComment(sql, i, strict):
+		case isLineComment(sql, i, hash, looseDash):
 			j := skipLineComment(sql, i)
 			comments = append(comments, span{i, j})
 			i = j
@@ -104,23 +110,23 @@ func lexSQL(sql string, backslash, dollar, strict bool) (comments, literals []sp
 	return comments, literals
 }
 
-// isLineComment reports whether a -- or # comment starts at sql[i]. Strictly,
-// # is not a comment (Postgres XOR) and -- needs a following space or control
-// byte (MySQL).
-func isLineComment(sql string, i int, strict bool) bool {
+// isLineComment reports whether a -- or # comment starts at sql[i].
+func isLineComment(sql string, i int, hash, looseDash bool) bool {
 	if sql[i] == '#' {
-		return !strict
+		return hash
 	}
 	if sql[i] != '-' || i+1 >= len(sql) || sql[i+1] != '-' {
 		return false
 	}
-	return !strict || i+2 >= len(sql) || sql[i+2] <= ' '
+	return looseDash || i+2 >= len(sql) || sql[i+2] <= ' '
 }
 
-func inSpans(spans []span, pos int) bool {
-	for _, s := range spans {
-		if pos >= s.lo && pos < s.hi {
-			return true
+func inAnySpans(readings [][]span, pos int) bool {
+	for _, spans := range readings {
+		for _, s := range spans {
+			if pos >= s.lo && pos < s.hi {
+				return true
+			}
 		}
 	}
 	return false

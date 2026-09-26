@@ -52,7 +52,7 @@ where each literal ends, which dialects disagree about (backslash escapes, and
 whether `$$` opens a string), so it runs every reading and honors a directive
 only where all of them put it in a comment. Comment markers vary too (`#` is XOR in
 Postgres; MySQL's `--` needs trailing whitespace), so a directive in a comment is
-still dropped if the strict markers put it inside a literal. That is the opposite side from
+still dropped if any combination of those markers puts it inside a literal. That is the opposite side from
 `Redact`'s union, and deliberately: a spurious suppression hides findings,
 while a missed one merely reports a finding.
 

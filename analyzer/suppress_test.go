@@ -50,6 +50,8 @@ func TestParseIgnoreDirective(t *testing.T) {
 		{"hash before a marker literal", "SELECT * FROM t WHERE flags # 4 = 0 AND note = '-- sqlguard:ignore'", false, nil},
 		{"mysql double minus", "SELECT * FROM t WHERE a = 1--'-- sqlguard:ignore'", false, nil},
 		{"tight double dash", "SELECT * FROM t --sqlguard:ignore", true, nil},
+		// MySQL's own mix: # is a comment, --x is not, so a string opens after it.
+		{"mysql marker mix", "SELECT * FROM t WHERE a = 1 # '\n--x' -- sqlguard:ignore '", false, nil},
 
 		// "//" is not a SQL comment in any dialect.
 		{"double slash", "SELECT * FROM t // sqlguard:ignore", false, nil},
