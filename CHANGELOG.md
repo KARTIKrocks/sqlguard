@@ -9,6 +9,10 @@ the same version in lockstep.
 
 ## [Unreleased]
 
+### Changed
+
+- `golangci-lint` pinned to v2.14.0 (was v2.13.2).
+
 ### Fixed
 
 - **A `sqlguard:ignore` inside a string literal no longer suppresses
