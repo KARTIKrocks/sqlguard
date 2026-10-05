@@ -175,6 +175,7 @@ func TestFallbackScopedWhereLimit(t *testing.T) {
 		{"SELECT a FROM t WHERE x = 1 UNION SELECT a FROM u, (SELECT 1 FROM v LIMIT 1) s", true, true},
 		{"SELECT * FROM t CROSS JOIN LATERAL (SELECT id FROM v WHERE v.a = t.a LIMIT 1) s", true, true},
 		{"SELECT a, (SELECT b FROM u LIMIT 1) FROM t", false, false},
+		{"SELECT a FROM (SELECT a, (SELECT 1 FROM v WHERE v.x = 1 LIMIT 1) FROM t) s", false, false},
 		{"SELECT * FROM generate_series(1, (SELECT max(n) FROM u WHERE x = 1))", false, false},
 	}
 	for _, tt := range tests {

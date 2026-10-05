@@ -320,6 +320,7 @@ func TestParser_NeverAddsFindingTheFallbackDoesNot(t *testing.T) {
 		"(SELECT a FROM t ORDER BY a LIMIT 10) UNION ALL (SELECT b FROM u ORDER BY b LIMIT 10)",
 		"SELECT * FROM t JOIN u ON u.id IN (SELECT id FROM v WHERE flag = 1)",
 		"SELECT a FROM (SELECT a FROM t LIMIT 3) s",
+		"SELECT a FROM (SELECT a, (SELECT 1 FROM v WHERE v.x = 1) FROM t) s",
 		"SELECT a FROM t UNION SELECT a FROM u, (SELECT 1 FROM v LIMIT 1) s",
 		"SELECT a FROM (SELECT a FROM t WHERE x = 1) s",
 		"WITH c AS (SELECT a FROM t WHERE x = 1 LIMIT 3) SELECT a FROM c",

@@ -483,21 +483,14 @@ func fromRegionBounds(sanitized string) (lo, hi int) {
 // fromRegions returns every top-level FROM clause, one per SELECT arm of a set
 // operation, each running to the next top-level clause keyword.
 func fromRegions(sanitized string) []span {
-	var ends []int
-	for _, loc := range fbFromRegionEndRe.FindAllStringIndex(sanitized, -1) {
-		if parenDepthBefore(sanitized, loc[0]) == 0 {
-			ends = append(ends, loc[0])
-		}
-	}
-	var out []span
-	for _, loc := range fbFromRe.FindAllStringIndex(sanitized, -1) {
-		if parenDepthBefore(sanitized, loc[0]) != 0 {
-			continue
-		}
+	ends := topLevelMatches(sanitized, fbFromRegionEndRe)
+	froms := topLevelMatches(sanitized, fbFromRe)
+	out := make([]span, 0, len(froms))
+	for _, loc := range froms {
 		hi := len(sanitized)
 		for _, e := range ends {
-			if e >= loc[1] {
-				hi = e
+			if e[0] >= loc[1] {
+				hi = e[0]
 				break
 			}
 		}
@@ -506,55 +499,95 @@ func fromRegions(sanitized string) []span {
 	return out
 }
 
-// scopedBounds reports whether a WHERE and a LIMIT bound the statement's rows:
-// at the top level, or for a SELECT also inside a FROM-clause derived table, a
-// CTE body or a set-operation operand. One inside IN (...), a scalar subquery
-// or a function argument bounds only that subquery (#91).
-func scopedBounds(sanitized string, kind StmtKind) (where, limit bool) {
-	s := unwrapStatementParens(sanitized)
-	var sources []span
-	haveSources := false
-	scoped := func(re *regexp.Regexp) bool {
-		if !re.MatchString(s) {
-			return false
-		}
-		for _, loc := range re.FindAllStringIndex(s, -1) {
-			if parenDepthBefore(s, loc[0]) == 0 {
-				return true
-			}
-			if kind == StmtSelect && !haveSources {
-				sources, haveSources = rowSourceSpans(s), true
-			}
-			if inSpan(sources, loc[0]) {
-				return true
+// topLevelMatches returns the matches of re at parenthesis depth zero, finding
+// the depth in one pass over s rather than rescanning the prefix per match.
+func topLevelMatches(s string, re *regexp.Regexp) [][]int {
+	locs := re.FindAllStringIndex(s, -1)
+	out := locs[:0]
+	depth, pos := 0, 0
+	for _, loc := range locs {
+		for ; pos < loc[0]; pos++ {
+			switch s[pos] {
+			case '(':
+				depth++
+			case ')':
+				depth = max(depth-1, 0)
 			}
 		}
-		return false
-	}
-	return scoped(fbWhereRe), scoped(fbLimitRe)
-}
-
-// rowSourceSpans returns the top-level parenthesised groups that feed rows to
-// the statement: derived tables, CTE bodies and set-operation operands. An ON
-// condition or a function argument in FROM is not one.
-func rowSourceSpans(s string) []span {
-	froms := fromRegions(s)
-	var out []span
-	depth := 0
-	for i := range len(s) {
-		switch s[i] {
-		case '(':
-			if depth == 0 && opensRowSource(s[:i], inSpan(froms, i)) {
-				out = append(out, span{i, closingParen(s, i)})
-			}
-			depth++
-		case ')':
-			if depth > 0 {
-				depth--
-			}
+		if depth == 0 {
+			out = append(out, loc)
 		}
 	}
 	return out
+}
+
+// scopedBounds reports whether a WHERE and a LIMIT bound the statement's rows:
+// at the top level, or for a SELECT also where every enclosing parenthesis is a
+// row source (a FROM-clause derived table, a CTE body or a set-operation
+// operand). One inside IN (...), a scalar subquery or a function argument
+// bounds only that subquery, however deeply it is nested in a derived table
+// (#91). One pass over the text, and none when neither keyword occurs.
+func scopedBounds(sanitized string, kind StmtKind) (where, limit bool) {
+	s := unwrapStatementParens(sanitized)
+	wl := fbWhereRe.FindAllStringIndex(s, -1)
+	ll := fbLimitRe.FindAllStringIndex(s, -1)
+	if len(wl) == 0 && len(ll) == 0 {
+		return false, false
+	}
+	var froms []span
+	if kind == StmtSelect {
+		froms = fromRegions(s)
+	}
+	var sc rowScope
+	for i := range len(s) {
+		var hit bool
+		if wl, hit = advance(wl, i); hit && sc.nonRow == 0 {
+			where = true
+		}
+		if ll, hit = advance(ll, i); hit && sc.nonRow == 0 {
+			limit = true
+		}
+		switch s[i] {
+		case '(':
+			sc.push(kind != StmtSelect || !opensRowSource(s[:i], len(sc.open) == 0 && inSpan(froms, i)))
+		case ')':
+			sc.pop()
+		}
+	}
+	return where, limit
+}
+
+// rowScope tracks the open parentheses: open[i] is true when the i-th is not a
+// row source, and nonRow counts those.
+type rowScope struct {
+	open   []bool
+	nonRow int
+}
+
+func (r *rowScope) push(notRowSource bool) {
+	r.open = append(r.open, notRowSource)
+	if notRowSource {
+		r.nonRow++
+	}
+}
+
+func (r *rowScope) pop() {
+	n := len(r.open)
+	if n == 0 {
+		return
+	}
+	if r.open[n-1] {
+		r.nonRow--
+	}
+	r.open = r.open[:n-1]
+}
+
+// advance consumes locs[0] when it starts at i.
+func advance(locs [][]int, i int) ([][]int, bool) {
+	if len(locs) > 0 && locs[0][0] == i {
+		return locs[1:], true
+	}
+	return locs, false
 }
 
 // opensRowSource reports whether a "(" after prefix opens a row source.
@@ -597,23 +630,6 @@ func hasTrailingWord(p, w string) bool {
 		return false
 	}
 	return len(p) == len(w) || !isIdentByte(p[len(p)-len(w)-1])
-}
-
-// closingParen returns the index just past the ')' matching s[open], or len(s).
-func closingParen(s string, open int) int {
-	depth := 0
-	for i := open; i < len(s); i++ {
-		switch s[i] {
-		case '(':
-			depth++
-		case ')':
-			depth--
-			if depth == 0 {
-				return i + 1
-			}
-		}
-	}
-	return len(s)
 }
 
 func inSpan(spans []span, pos int) bool {
