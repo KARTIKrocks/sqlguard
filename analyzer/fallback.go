@@ -596,7 +596,11 @@ func opensRowSource(prefix string, inFrom bool) bool {
 	if p == "" || (inFrom && strings.HasSuffix(p, ",")) {
 		return true
 	}
-	for _, w := range []string{"FROM", "JOIN", "LATERAL"} {
+	// IS [NOT] DISTINCT FROM (...) compares against a scalar subquery.
+	if hasTrailingWord(p, "FROM") && !hasTrailingWord(trimTrailingWord(p, "FROM"), "DISTINCT") {
+		return true
+	}
+	for _, w := range []string{"JOIN", "LATERAL"} {
 		if hasTrailingWord(p, w) {
 			return true
 		}
