@@ -136,8 +136,7 @@ func (p *FallbackParser) Parse(sql string) (*Statement, error) {
 	sanitized := blankStringLiterals(noComments)
 
 	st.Kind = detectKind(sanitized)
-	st.HasWhere = fbWhereRe.MatchString(sanitized)
-	st.HasLimit = fbLimitRe.MatchString(sanitized)
+	st.HasWhere, st.HasLimit = scopedBounds(sanitized, st.Kind)
 	st.HasOrderBy = hasTopLevelOrderBy(sanitized)
 	st.HasFrom = fbFromRe.MatchString(sanitized)
 	st.SelectStar = fbSelectStarRe.MatchString(sanitized)
@@ -468,23 +467,155 @@ func unwrapStatementParens(sanitized string) string {
 // parenthesis depth zero, so subquery and function-argument keywords are
 // ignored.
 func fromRegion(sanitized string) string {
-	fromEnd := -1
-	for _, loc := range fbFromRe.FindAllStringIndex(sanitized, -1) {
+	lo, hi := fromRegionBounds(sanitized)
+	return sanitized[lo:hi]
+}
+
+// fromRegionBounds is fromRegion as a byte range; lo == hi when there is no
+// top-level FROM.
+func fromRegionBounds(sanitized string) (lo, hi int) {
+	if r := fromRegions(sanitized); len(r) > 0 {
+		return r[0].lo, r[0].hi
+	}
+	return 0, 0
+}
+
+// fromRegions returns every top-level FROM clause, one per SELECT arm of a set
+// operation, each running to the next top-level clause keyword.
+func fromRegions(sanitized string) []span {
+	var ends []int
+	for _, loc := range fbFromRegionEndRe.FindAllStringIndex(sanitized, -1) {
 		if parenDepthBefore(sanitized, loc[0]) == 0 {
-			fromEnd = loc[1]
-			break
+			ends = append(ends, loc[0])
 		}
 	}
-	if fromEnd == -1 {
-		return ""
+	var out []span
+	for _, loc := range fbFromRe.FindAllStringIndex(sanitized, -1) {
+		if parenDepthBefore(sanitized, loc[0]) != 0 {
+			continue
+		}
+		hi := len(sanitized)
+		for _, e := range ends {
+			if e >= loc[1] {
+				hi = e
+				break
+			}
+		}
+		out = append(out, span{loc[1], hi})
 	}
-	region := sanitized[fromEnd:]
-	for _, loc := range fbFromRegionEndRe.FindAllStringIndex(region, -1) {
-		if parenDepthBefore(region, loc[0]) == 0 {
-			return region[:loc[0]]
+	return out
+}
+
+// scopedBounds reports whether a WHERE and a LIMIT bound the statement's rows:
+// at the top level, or for a SELECT also inside a FROM-clause derived table, a
+// CTE body or a set-operation operand. One inside IN (...), a scalar subquery
+// or a function argument bounds only that subquery (#91).
+func scopedBounds(sanitized string, kind StmtKind) (where, limit bool) {
+	s := unwrapStatementParens(sanitized)
+	var sources []span
+	if kind == StmtSelect {
+		sources = rowSourceSpans(s)
+	}
+	scoped := func(re *regexp.Regexp) bool {
+		for _, loc := range re.FindAllStringIndex(s, -1) {
+			if parenDepthBefore(s, loc[0]) == 0 || inSpan(sources, loc[0]) {
+				return true
+			}
+		}
+		return false
+	}
+	return scoped(fbWhereRe), scoped(fbLimitRe)
+}
+
+// rowSourceSpans returns the top-level parenthesised groups that feed rows to
+// the statement: derived tables, CTE bodies and set-operation operands. An ON
+// condition or a function argument in FROM is not one.
+func rowSourceSpans(s string) []span {
+	froms := fromRegions(s)
+	var out []span
+	depth := 0
+	for i := range len(s) {
+		switch s[i] {
+		case '(':
+			if depth == 0 && opensRowSource(s[:i], inSpan(froms, i)) {
+				out = append(out, span{i, closingParen(s, i)})
+			}
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
 		}
 	}
-	return region
+	return out
+}
+
+// opensRowSource reports whether a "(" after prefix opens a row source.
+func opensRowSource(prefix string, inFrom bool) bool {
+	p := strings.TrimRight(prefix, " \t\r\n")
+	if p == "" || (inFrom && strings.HasSuffix(p, ",")) {
+		return true
+	}
+	for _, w := range []string{"FROM", "JOIN", "LATERAL"} {
+		if hasTrailingWord(p, w) {
+			return true
+		}
+	}
+	q := trimTrailingWord(trimTrailingWord(p, "ALL"), "DISTINCT")
+	for _, w := range []string{"UNION", "INTERSECT", "EXCEPT"} {
+		if hasTrailingWord(q, w) {
+			return true
+		}
+	}
+	return opensCTEBody(p)
+}
+
+// opensCTEBody reports whether prefix ends in AS [NOT] [MATERIALIZED], the
+// words before a CTE body's "(".
+func opensCTEBody(prefix string) bool {
+	p := trimTrailingWord(strings.TrimRight(prefix, " \t\r\n"), "MATERIALIZED")
+	p = trimTrailingWord(p, "NOT")
+	return hasTrailingWord(p, "AS")
+}
+
+func trimTrailingWord(p, w string) string {
+	if hasTrailingWord(p, w) {
+		return strings.TrimRight(p[:len(p)-len(w)], " \t\r\n")
+	}
+	return p
+}
+
+func hasTrailingWord(p, w string) bool {
+	if len(p) < len(w) || !strings.EqualFold(p[len(p)-len(w):], w) {
+		return false
+	}
+	return len(p) == len(w) || !isIdentByte(p[len(p)-len(w)-1])
+}
+
+// closingParen returns the index just past the ')' matching s[open], or len(s).
+func closingParen(s string, open int) int {
+	depth := 0
+	for i := open; i < len(s); i++ {
+		switch s[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return i + 1
+			}
+		}
+	}
+	return len(s)
+}
+
+func inSpan(spans []span, pos int) bool {
+	for _, sp := range spans {
+		if pos >= sp.lo && pos < sp.hi {
+			return true
+		}
+	}
+	return false
 }
 
 // parenDepthBefore returns the net parenthesis nesting depth at index idx

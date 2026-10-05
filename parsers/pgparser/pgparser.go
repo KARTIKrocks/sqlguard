@@ -62,13 +62,13 @@ func (p *Parser) Parse(sql string) (*analyzer.Statement, error) {
 		st.HasLimit = hasRowLimit(n.Limit)
 		st.OffsetValue = offsetValue(n.Limit)
 		fillSelectBody(st, n.Select)
-		if isSetOperation(n.Select) {
-			keepFallbackBounds(st, &fb)
-		}
+		keepFallbackBounds(st, &fb)
 	case *tree.SelectClause:
+		fb := *st
 		resetStructural(st)
 		st.Kind = analyzer.StmtSelect
 		fillSelectClause(st, n)
+		keepFallbackBounds(st, &fb)
 	case *tree.Delete:
 		resetStructural(st)
 		st.Kind = analyzer.StmtDelete
@@ -162,7 +162,7 @@ func fillSelectBody(st *analyzer.Statement, sel tree.SelectStatement) {
 
 // mergeArm folds one operand of a set operation (UNION / INTERSECT / EXCEPT)
 // into st: a FROM, a star, a DISTINCT or a literal OFFSET in either operand is
-// one in the statement. Its WHERE and LIMIT are left to keepFallbackBounds, and
+// one in the statement. Its WHERE and LIMIT come from keepFallbackBounds, and
 // its ORDER BY orders that operand, not the result, so it is not merged.
 func mergeArm(st *analyzer.Statement, arm *tree.Select) {
 	if arm == nil {
@@ -177,32 +177,11 @@ func mergeArm(st *analyzer.Statement, arm *tree.Select) {
 	st.OffsetValue = max(st.OffsetValue, a.OffsetValue)
 }
 
-// isSetOperation reports whether a select body is a UNION / INTERSECT /
-// EXCEPT, looking through parentheses around the whole of it.
-func isSetOperation(sel tree.SelectStatement) bool {
-	for {
-		switch c := sel.(type) {
-		case *tree.UnionClause:
-			return true
-		case *tree.ParenSelect:
-			if c.Select == nil {
-				return false
-			}
-			sel = c.Select.Select
-		default:
-			return false
-		}
-	}
-}
-
-// keepFallbackBounds takes a set operation's WHERE and LIMIT presence from the
-// fallback, which counts them anywhere in the text — inside an operand's
-// subquery too. Reading them from the operands' top level instead reports
-// select-without-limit on SELECT a FROM t UNION SELECT b FROM (SELECT b FROM u
-// LIMIT 3) s, which the fallback does not, and a parser may only remove
-// findings. A LIMIT on the whole result is still read from the AST.
+// keepFallbackBounds ORs in the fallback's WHERE / LIMIT, which also counts
+// one inside a derived table, a CTE body or a set-operation
+// operand. The AST's own answer covers only the top level (#91).
 func keepFallbackBounds(st, fb *analyzer.Statement) {
-	st.HasWhere = fb.HasWhere
+	st.HasWhere = st.HasWhere || fb.HasWhere
 	st.HasLimit = st.HasLimit || fb.HasLimit
 }
 

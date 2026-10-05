@@ -40,10 +40,14 @@ type Statement struct {
 	// Kind is the statement's top-level kind.
 	Kind StmtKind
 
-	// HasWhere reports whether the statement has a WHERE clause.
+	// HasWhere reports whether a WHERE filters the statement's rows: at the
+	// top level, or for a SELECT inside a derived table, CTE body or
+	// parenthesised set-operation operand. One inside IN (...) or a scalar
+	// subquery does not count.
 	HasWhere bool
 
-	// HasLimit reports whether the statement has a LIMIT clause.
+	// HasLimit reports whether a LIMIT bounds the statement, scoped like
+	// HasWhere. The fallback counts the bare keyword, so LIMIT ALL counts.
 	HasLimit bool
 
 	// HasOrderBy reports whether the statement has an ORDER BY clause.
@@ -146,9 +150,8 @@ type Statement struct {
 	// ImplicitCommaJoin, CartesianJoin, and the literal/text-level fields
 	// (LeadingWildcard*, NonSargablePredicate, AddNotNullNoDefault) — because
 	// they read literal values the AST discards or are intentionally text-level.
-	// Each such field documents this. For a set operation (UNION / INTERSECT /
-	// EXCEPT) HasWhere and HasLimit are taken from the fallback too, which
-	// counts a WHERE or LIMIT anywhere in the text, so the grammar can never
-	// report select-without-limit where the default parser does not.
+	// Each such field documents this. For a SELECT, the dialect parsers read
+	// HasWhere and HasLimit from the AST at the top level and take the
+	// derived-table, CTE and set-operand part from the fallback.
 	Exact bool
 }

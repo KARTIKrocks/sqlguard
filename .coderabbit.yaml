@@ -166,6 +166,10 @@ reviews:
         with Exact=false, because blanking fields nothing was derived for drops
         findings silently (#81). HasLimit means a row count, not a limit node
         (#82).
+        HasWhere/HasLimit count only a clause that bounds the statement's rows:
+        top level, or for a SELECT a derived table, CTE body or parenthesised
+        set-operation operand — never IN (...) or a scalar subquery. Parsers OR their top-level AST
+        answer with the fallback's for every SELECT (#91).
 
     - path: "config/**"
       instructions: >-
