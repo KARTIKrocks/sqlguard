@@ -513,12 +513,19 @@ func fromRegions(sanitized string) []span {
 func scopedBounds(sanitized string, kind StmtKind) (where, limit bool) {
 	s := unwrapStatementParens(sanitized)
 	var sources []span
-	if kind == StmtSelect {
-		sources = rowSourceSpans(s)
-	}
+	haveSources := false
 	scoped := func(re *regexp.Regexp) bool {
+		if !re.MatchString(s) {
+			return false
+		}
 		for _, loc := range re.FindAllStringIndex(s, -1) {
-			if parenDepthBefore(s, loc[0]) == 0 || inSpan(sources, loc[0]) {
+			if parenDepthBefore(s, loc[0]) == 0 {
+				return true
+			}
+			if kind == StmtSelect && !haveSources {
+				sources, haveSources = rowSourceSpans(s), true
+			}
+			if inSpan(sources, loc[0]) {
 				return true
 			}
 		}
