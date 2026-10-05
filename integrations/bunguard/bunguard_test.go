@@ -73,7 +73,7 @@ func newDBWithCapture(t *testing.T, opts ...middleware.Option) (*bun.DB, *captur
 	cap := &capture{}
 	opts = append([]middleware.Option{middleware.WithReporter(cap)}, opts...)
 	hook := New(opts...)
-	db.AddQueryHook(hook)
+	db = db.WithQueryHook(hook)
 	// Hook registered after seeding, so capture starts clean — every test
 	// asserts only on findings from its own queries.
 	return db, cap, hook
