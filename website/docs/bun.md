@@ -26,7 +26,7 @@ import (
 sqldb := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
 db := bun.NewDB(sqldb, pgdialect.New())
 
-db.AddQueryHook(bunguard.New(
+db = db.WithQueryHook(bunguard.New(
     middleware.WithSlowQueryThreshold(500*time.Millisecond),
     middleware.WithN1Detection(10, time.Second),
 ))
@@ -36,13 +36,13 @@ db.AddQueryHook(bunguard.New(
 
 | Symbol | Use |
 | --- | --- |
-| `bunguard.New(opts ...middleware.Option) *QueryHook` | Build the hook. Pass to `db.AddQueryHook`. |
+| `bunguard.New(opts ...middleware.Option) *QueryHook` | Build the hook. Pass to `db.WithQueryHook`. |
 | `(*QueryHook).ResetN1()` | Clear N+1 state at a request boundary. |
 | `BeforeQuery`, `AfterQuery` | The `bun.QueryHook` methods; you do not call them. |
 
 ```go
 hook := bunguard.New(middleware.WithN1Detection(10, time.Second))
-db.AddQueryHook(hook)
+db = db.WithQueryHook(hook)
 
 func handler(w http.ResponseWriter, r *http.Request) {
     defer hook.ResetN1()

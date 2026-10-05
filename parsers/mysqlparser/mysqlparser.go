@@ -58,9 +58,11 @@ func (p *Parser) Parse(sql string) (*analyzer.Statement, error) {
 
 	switch n := ast.(type) {
 	case *sqlparser.Select:
+		fb := *st
 		resetStructural(st)
 		st.Kind = analyzer.StmtSelect
 		fillSelect(st, n, true)
+		keepFallbackBounds(st, &fb)
 	case *sqlparser.Union:
 		fb := *st
 		resetStructural(st)
@@ -132,7 +134,7 @@ func hasRowLimit(lim *sqlparser.Limit) bool {
 // st. top is false for the operands of a set operation: a FROM, a star, a
 // DISTINCT or a literal OFFSET in either operand is one in the statement, but
 // an operand's ORDER BY orders that operand rather than the result, and its
-// WHERE and LIMIT are left to keepFallbackBounds.
+// WHERE and LIMIT come from keepFallbackBounds.
 func fillSelect(st *analyzer.Statement, sel sqlparser.SelectStatement, top bool) {
 	switch s := sel.(type) {
 	case *sqlparser.Select:
@@ -158,14 +160,11 @@ func fillSelect(st *analyzer.Statement, sel sqlparser.SelectStatement, top bool)
 	}
 }
 
-// keepFallbackBounds takes a set operation's WHERE and LIMIT presence from the
-// fallback, which counts them anywhere in the text — inside an operand's
-// subquery too. Reading them from the operands' top level instead reports
-// select-without-limit on SELECT a FROM t UNION SELECT b FROM (SELECT b FROM u
-// LIMIT 3) s, which the fallback does not, and a parser may only remove
-// findings. A LIMIT on the whole result is still read from the AST.
+// keepFallbackBounds ORs in the fallback's WHERE / LIMIT, which also counts
+// one inside a derived table, a CTE body or a set-operation
+// operand. The AST's own answer covers only the top level (#91).
 func keepFallbackBounds(st, fb *analyzer.Statement) {
-	st.HasWhere = fb.HasWhere
+	st.HasWhere = st.HasWhere || fb.HasWhere
 	st.HasLimit = st.HasLimit || fb.HasLimit
 }
 

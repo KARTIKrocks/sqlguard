@@ -315,16 +315,33 @@ func TestParser_NeverAddsFindingTheFallbackDoesNot(t *testing.T) {
 		"CREATE VIEW v AS SELECT * FROM t",
 		"EXPLAIN SELECT * FROM t",
 		"SHOW TABLES",
+		// A WHERE / LIMIT only some subqueries bound (#91).
+		"(SELECT a FROM t WHERE id = 1) UNION ALL (SELECT b FROM u WHERE id = 2)",
+		"(SELECT a FROM t ORDER BY a LIMIT 10) UNION ALL (SELECT b FROM u ORDER BY b LIMIT 10)",
+		"SELECT * FROM t JOIN u ON u.id IN (SELECT id FROM v WHERE flag = 1)",
+		"SELECT a FROM (SELECT a FROM t LIMIT 3) s",
+		"SELECT a FROM (SELECT a, (SELECT 1 FROM v WHERE v.x = 1) FROM t) s",
+		"SELECT a FROM t UNION SELECT a FROM u, (SELECT 1 FROM v LIMIT 1) s",
+		"SELECT a FROM (SELECT a FROM t WHERE x = 1) s",
+		"WITH c AS (SELECT a FROM t WHERE x = 1 LIMIT 3) SELECT a FROM c",
+		"SELECT a FROM t WHERE id IN (SELECT id FROM u LIMIT 1) ORDER BY a",
+		"SELECT (SELECT max(b) FROM u WHERE u.id = t.id) FROM t",
+		"UPDATE t SET a = (SELECT b FROM u WHERE u.id = t.id)",
+		"DELETE t FROM t JOIN (SELECT id FROM u WHERE x = 1) s ON s.id = t.id",
 	}
 
 	fallback := analyzer.Default()
 	exact := analyzer.Default().WithParser(New())
 	coreKnows := fallbackKnowsInsertLikeKeywords()
+	coreScopes := fallbackScopesWhereLimit()
 
 	for _, sql := range corpus {
 		t.Run(sql, func(t *testing.T) {
 			if !coreKnows && needsCoreKeywordSupport(sql) {
 				t.Skip("linked core predates the fallback's row-inserting keyword support")
+			}
+			if !coreScopes && strings.Contains(sql, "(SELECT") {
+				t.Skip("linked core predates the fallback's scoped WHERE / LIMIT (#91)")
 			}
 			base := ruleSet(fallback.Analyze(sql))
 			for name := range ruleSet(exact.Analyze(sql)) {
@@ -370,4 +387,11 @@ func ruleSet(rs []analyzer.Result) map[string]struct{} {
 func fallbackKnowsInsertLikeKeywords() bool {
 	st, _ := analyzer.NewFallbackParser().Parse("REPLACE INTO t VALUES (1)")
 	return st.Kind == analyzer.StmtInsert
+}
+
+// fallbackScopesWhereLimit reports whether the linked core ignores a WHERE
+// inside a scalar subquery when deciding whether a statement is filtered.
+func fallbackScopesWhereLimit() bool {
+	st, _ := analyzer.NewFallbackParser().Parse("SELECT (SELECT b FROM u WHERE x = 1) FROM t")
+	return !st.HasWhere
 }

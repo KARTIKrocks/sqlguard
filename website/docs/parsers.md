@@ -78,10 +78,14 @@ The rest stay best-effort heuristics regardless of the parser, and each
 field's doc comment says so. This is a documented carve-out, not a gap
 waiting to be closed.
 
-For a set operation (`UNION`, `INTERSECT`, `EXCEPT`), `HasWhere` and
-`HasLimit` also stay lexical: the fallback counts a `WHERE` or `LIMIT`
-anywhere, including inside an operand's subquery, and reading them per
-operand would report findings the fallback does not.
+_Changed in 0.6._ `HasWhere` and `HasLimit` count a `WHERE` or `LIMIT`
+that bounds the statement's rows: at the top level, or for a `SELECT`
+inside a derived table, a CTE body or a parenthesised set-operation
+operand. One inside `IN (...)`, a scalar subquery or a function argument
+bounds only that subquery and does not count. The parsers read the top
+level from the AST and take the derived-table, CTE and set-operand part
+from the fallback, so both always agree. Before 0.6 the fallback counted a
+`WHERE` or `LIMIT` anywhere and the parsers only at the top level.
 
 _Changed in 0.6._ A statement the grammar accepts but the parser does not
 model — DDL, `EXPLAIN`, `CREATE VIEW … AS SELECT` — keeps the fallback's

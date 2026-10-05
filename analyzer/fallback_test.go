@@ -145,3 +145,48 @@ func TestFallbackParserDollarQuotedBody(t *testing.T) {
 		})
 	}
 }
+
+// TestFallbackScopedWhereLimit pins which WHERE / LIMIT bound a statement's
+// rows (#91): top level, and for a SELECT a derived table, CTE body or
+// parenthesised set-operation operand; never one inside IN (...), a scalar
+// subquery or a function argument.
+func TestFallbackScopedWhereLimit(t *testing.T) {
+	tests := []struct {
+		sql                  string
+		wantWhere, wantLimit bool
+	}{
+		{"SELECT a FROM t WHERE x = 1 LIMIT 5", true, true},
+		{"SELECT a FROM (SELECT a FROM t LIMIT 3) s", false, true},
+		{"SELECT a FROM (SELECT a FROM t WHERE x = 1) s", true, false},
+		{"SELECT a FROM t JOIN (SELECT id FROM u LIMIT 3) s ON s.id = t.id", false, true},
+		{"WITH c AS (SELECT a FROM t WHERE x = 1 LIMIT 3) SELECT a FROM c", true, true},
+		{"WITH c AS MATERIALIZED (SELECT a FROM t LIMIT 3) SELECT a FROM c", false, true},
+		{"SELECT a FROM t WHERE id IN (SELECT id FROM u LIMIT 1)", true, false},
+		{"SELECT (SELECT max(b) FROM u WHERE u.id = t.id) FROM t", false, false},
+		{"SELECT ARRAY(SELECT b FROM u LIMIT 5) FROM t", false, false},
+		{"(SELECT a FROM t WHERE x = 1 LIMIT 5)", true, true},
+		{"UPDATE t SET a = (SELECT b FROM u WHERE u.id = t.id)", false, false},
+		{"WITH c AS (SELECT id FROM u WHERE x = 1) DELETE FROM t", false, false},
+		{"DELETE FROM t WHERE id IN (SELECT id FROM u)", true, false},
+		{"(SELECT a FROM t WHERE id = 1) UNION ALL (SELECT b FROM u WHERE id = 2)", true, false},
+		{"(SELECT a FROM t ORDER BY a LIMIT 10) UNION ALL (SELECT b FROM u ORDER BY b LIMIT 10)", false, true},
+		{"SELECT * FROM t JOIN u ON u.id IN (SELECT id FROM v WHERE flag = 1)", false, false},
+		{"SELECT * FROM t, (SELECT id FROM v LIMIT 3) s", false, true},
+		{"SELECT a FROM t WHERE x = 1 UNION SELECT a FROM u, (SELECT 1 FROM v LIMIT 1) s", true, true},
+		{"SELECT * FROM t CROSS JOIN LATERAL (SELECT id FROM v WHERE v.a = t.a LIMIT 1) s", true, true},
+		{"SELECT a, (SELECT b FROM u LIMIT 1) FROM t", false, false},
+		{"SELECT a FROM t WHERE a IS DISTINCT FROM (SELECT x FROM u LIMIT 1)", true, false},
+		{"SELECT a IS DISTINCT FROM (SELECT x FROM u WHERE y = 1 LIMIT 1) FROM t", false, false},
+		{"SELECT a IS NOT DISTINCT FROM (SELECT x FROM u WHERE y = 1 LIMIT 1) FROM t", false, false},
+		{"SELECT a FROM (SELECT a, (SELECT 1 FROM v WHERE v.x = 1 LIMIT 1) FROM t) s", false, false},
+		{"SELECT * FROM generate_series(1, (SELECT max(n) FROM u WHERE x = 1))", false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.sql, func(t *testing.T) {
+			st, _ := NewFallbackParser().Parse(tt.sql)
+			if st.HasWhere != tt.wantWhere || st.HasLimit != tt.wantLimit {
+				t.Errorf("HasWhere=%v HasLimit=%v, want %v %v", st.HasWhere, st.HasLimit, tt.wantWhere, tt.wantLimit)
+			}
+		})
+	}
+}

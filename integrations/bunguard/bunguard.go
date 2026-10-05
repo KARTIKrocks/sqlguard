@@ -8,7 +8,7 @@
 //
 //	sqldb := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
 //	db := bun.NewDB(sqldb, pgdialect.New())
-//	db.AddQueryHook(bunguard.New(
+//	db = db.WithQueryHook(bunguard.New(
 //	    middleware.WithSlowQueryThreshold(500*time.Millisecond),
 //	    middleware.WithN1Detection(10, time.Second),
 //	))

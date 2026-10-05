@@ -15,6 +15,18 @@ the same version in lockstep.
 
 ### Fixed
 
+- **A `WHERE` or `LIMIT` inside a subquery counts only where it bounds the
+  statement** ([#91]). The default parser counted one anywhere and the
+  dialect parsers only at the top level, so the parsers reported findings the
+  default parser did not. Both now count the top level, and for a `SELECT` a
+  derived table, CTE body or parenthesised set-operation operand; one inside
+  `IN (...)`, a scalar subquery or a function argument does not. The default
+  parser therefore reports some findings it used to miss:
+  `UPDATE t SET a = (SELECT b FROM u WHERE …)` gets `update-without-where`
+  (it updates every row), and `… WHERE id IN (SELECT … LIMIT 1) ORDER BY a`
+  gets `orderby-without-limit`. The parsers take the derived-table, CTE and
+  set-operand part from the default parser, which replaces the set-operation
+  special case.
 - **A `sqlguard:ignore` inside a string literal no longer suppresses
   anything** ([#66]). The in-SQL directive only had to follow a comment
   marker somewhere earlier in the text, and the marker could itself be inside
@@ -70,6 +82,7 @@ the same version in lockstep.
 
 [#66]: https://github.com/KARTIKrocks/sqlguard/issues/66
 [#81]: https://github.com/KARTIKrocks/sqlguard/issues/81
+[#91]: https://github.com/KARTIKrocks/sqlguard/issues/91
 [#82]: https://github.com/KARTIKrocks/sqlguard/issues/82
 
 ## [0.5.0] - 2026-09-25
