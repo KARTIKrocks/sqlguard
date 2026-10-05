@@ -5,8 +5,8 @@ go 1.27
 require (
 	github.com/KARTIKrocks/sqlguard v0.5.0
 	github.com/mattn/go-sqlite3 v1.14.52
-	github.com/uptrace/bun v1.2.18
-	github.com/uptrace/bun/dialect/sqlitedialect v1.2.18
+	github.com/uptrace/bun v1.3.0
+	github.com/uptrace/bun/dialect/sqlitedialect v1.3.0
 )
 
 require (
