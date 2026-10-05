@@ -9,6 +9,10 @@ the same version in lockstep.
 
 ## [Unreleased]
 
+### Changed
+
+- `golangci-lint` pinned to v2.14.0 (was v2.13.2).
+
 ### Fixed
 
 - **A `WHERE` or `LIMIT` inside a subquery counts only where it bounds the
