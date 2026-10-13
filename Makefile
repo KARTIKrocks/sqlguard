@@ -1,6 +1,4 @@
-GOLANGCI_LINT_VERSION := v2.14.0
-GOIMPORTS_VERSION := v0.50.0
-GOVULNCHECK_VERSION := v1.8.0
+include common.mk
 
 # The Markdown linter. Versioned in website/package.json rather than pinned
 # here, so Dependabot keeps it current along with the rest of the docs toolchain.
@@ -33,7 +31,7 @@ SQLGUARD_TEST_PG_DSN ?= postgres://sqlguard:sqlguard@localhost:55432/sqlguard?ss
 SQLGUARD_TEST_MYSQL_DSN ?= root:sqlguard@tcp(localhost:53306)/sqlguard
 SQLGUARD_TEST_MARIADB_DSN ?= root:sqlguard@tcp(localhost:53307)/sqlguard
 
-.PHONY: all help setup deps ci test test-v test-race coverage lint lint-fix lint-docs lint-docs-fix fix fmt fmt-check vet tidy tidy-check build cli install bench clean db-up db-down test-integration vet-integration vuln print-golangci-lint-version print-govulncheck-version
+.PHONY: all help setup deps ci test test-v test-race coverage lint lint-fix lint-docs lint-docs-fix fix fmt fmt-check vet tidy tidy-check build cli install bench clean db-up db-down test-integration vet-integration vuln
 
 all: tidy fmt vet lint build test
 
@@ -67,21 +65,6 @@ help:
 	@echo "  install       - Install the CLI to \$$GOPATH/bin"
 	@echo "  bench         - Run benchmarks (all modules)"
 	@echo "  clean         - Remove build/coverage artifacts"
-
-## Install development tools (skips if already present)
-setup:
-	@command -v golangci-lint >/dev/null 2>&1 || { \
-		echo "Installing golangci-lint $(GOLANGCI_LINT_VERSION)..."; \
-		go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION); \
-	}
-	@command -v goimports >/dev/null 2>&1 || { \
-		echo "Installing goimports $(GOIMPORTS_VERSION)..."; \
-		go install golang.org/x/tools/cmd/goimports@$(GOIMPORTS_VERSION); \
-	}
-	@command -v govulncheck >/dev/null 2>&1 || { \
-		echo "Installing govulncheck $(GOVULNCHECK_VERSION)..."; \
-		go install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION); \
-	}
 
 ## Download module dependencies across all modules
 deps:
@@ -247,18 +230,6 @@ vuln: setup
 		echo "==> Scanning $$mod"; \
 		(cd $$mod && govulncheck ./...) || exit 1; \
 	done
-
-## Print the pinned linter version. CI resolves golangci-lint-action's version
-## input from this rather than hardcoding a second copy of the number, so the
-## workflow and this file cannot drift apart.
-print-golangci-lint-version:
-	@echo $(GOLANGCI_LINT_VERSION)
-
-## Print the pinned scanner version. CI installs govulncheck with this rather
-## than hardcoding a second copy of the number, so the workflow and this file
-## cannot drift apart.
-print-govulncheck-version:
-	@echo $(GOVULNCHECK_VERSION)
 
 ## Run benchmarks across all modules
 bench:
