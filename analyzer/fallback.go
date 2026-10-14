@@ -793,12 +793,20 @@ func skipBlockComment(s string, i int) int {
 //
 // Callers that must not let a literal hide a statement separator use
 // blankLiterals directly with both dialect readings; see IsMultiStatement.
-func blankStringLiterals(s string) string { return blankLiterals(s, true) }
+//
+// Backtick-quoted identifiers are reduced to `x` too. IsMultiStatement does not: a
+// backtick is no quote in Postgres, and a run of them must not hide a ";".
+func blankStringLiterals(s string) string { return blankQuoted(s, true, true) }
 
 // blankLiterals is blankStringLiterals with the dollar-quote reading made
 // explicit. dollarQuotes selects whether "$tag$...$tag$" is a literal
 // (Postgres) or ordinary identifier bytes (MySQL and everything else).
 func blankLiterals(s string, dollarQuotes bool) string {
+	return blankQuoted(s, dollarQuotes, false)
+}
+
+// blankQuoted is blankLiterals with backtick identifiers optionally reduced.
+func blankQuoted(s string, dollarQuotes, backticks bool) string {
 	var b strings.Builder
 	b.Grow(len(s))
 	for i := 0; i < len(s); {
@@ -812,26 +820,37 @@ func blankLiterals(s string, dollarQuotes bool) string {
 				continue
 			}
 		}
-		if c == '\'' || c == '"' {
-			q := c
-			b.WriteByte(q)
-			i++
-			for i < len(s) {
-				if s[i] == q {
-					if i+1 < len(s) && s[i+1] == q { // doubled-quote escape
-						i += 2
-						continue
-					}
-					i++
-					break
-				}
-				i++
-			}
-			b.WriteByte(q)
+		if c == '\'' || c == '"' || (backticks && c == '`' && strings.IndexByte(s[i+1:], '`') >= 0) {
+			i = blankQuotedRun(&b, s, i)
 			continue
 		}
 		b.WriteByte(c)
 		i++
 	}
 	return b.String()
+}
+
+// blankQuotedRun writes the quoted run starting at s[i] with its contents
+// removed and returns the index past it. A backtick run keeps one `x`, so a
+// quoted column under a function still reads as a column.
+func blankQuotedRun(b *strings.Builder, s string, i int) int {
+	q := s[i]
+	b.WriteByte(q)
+	if q == '`' {
+		b.WriteByte('x')
+	}
+	i++
+	for i < len(s) {
+		if s[i] == q {
+			if i+1 < len(s) && s[i+1] == q { // doubled-quote escape
+				i += 2
+				continue
+			}
+			i++
+			break
+		}
+		i++
+	}
+	b.WriteByte(q)
+	return i
 }

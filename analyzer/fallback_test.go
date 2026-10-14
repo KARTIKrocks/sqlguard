@@ -146,6 +146,42 @@ func TestFallbackParserDollarQuotedBody(t *testing.T) {
 	}
 }
 
+// TestFallbackParserBacktickNonSargable pins that a quoted column still counts
+// as a column under a function.
+func TestFallbackParserBacktickNonSargable(t *testing.T) {
+	st, _ := NewFallbackParser().Parse("SELECT * FROM `t` WHERE YEAR(`d`) = 1")
+	if !st.NonSargablePredicate {
+		t.Error("function on a backtick-quoted column not detected")
+	}
+}
+
+// TestFallbackParserBacktickIdentifiers pins that a backtick-quoted identifier
+// is data: one named like a keyword is not a clause.
+func TestFallbackParserBacktickIdentifiers(t *testing.T) {
+	cases := []struct {
+		name, sql                 string
+		wantWhere, wantLimit, ord bool
+	}{
+		{"table named where", "SELECT * FROM `where`", false, false, false},
+		{"column named limit", "SELECT `limit` FROM t", false, false, false},
+		{"column named order by", "SELECT `order by` FROM t", false, false, false},
+		{"real clauses still seen", "SELECT `a` FROM `where` WHERE `limit` = 1 LIMIT 5", true, true, false},
+		{"doubled backtick", "SELECT * FROM `a``b` WHERE x = 1 LIMIT 1", true, true, false},
+		{"unterminated backtick keeps the rest", "SELECT * FROM t ` WHERE x = 1", true, false, false},
+		{"order by after a quoted table", "SELECT * FROM `t` ORDER BY a", false, false, true},
+		{"backtick inside a string", "SELECT * FROM t WHERE n = '`' LIMIT 1", true, true, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			st, _ := NewFallbackParser().Parse(c.sql)
+			if st.HasWhere != c.wantWhere || st.HasLimit != c.wantLimit || st.HasOrderBy != c.ord {
+				t.Errorf("where/limit/order = %v/%v/%v, want %v/%v/%v",
+					st.HasWhere, st.HasLimit, st.HasOrderBy, c.wantWhere, c.wantLimit, c.ord)
+			}
+		})
+	}
+}
+
 // TestFallbackScopedWhereLimit pins which WHERE / LIMIT bound a statement's
 // rows (#91): top level, and for a SELECT a derived table, CTE body or
 // parenthesised set-operation operand; never one inside IN (...), a scalar

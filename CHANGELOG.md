@@ -27,6 +27,12 @@ the same version in lockstep.
   gets `orderby-without-limit`. The parsers take the derived-table, CTE and
   set-operand part from the default parser, which replaces the set-operation
   special case.
+- **A backtick-quoted identifier is no longer read as a clause** ([#99]).
+  The default parser blanked string literals but not backtick runs, so
+  ``SELECT * FROM `where` `` counted a `WHERE` and a MySQL table named
+  `limit` counted a `LIMIT`, hiding `select-without-where` and the like.
+  Backtick runs are now blanked before the clause scan. `IsMultiStatement`
+  deliberately does not, since a backtick is no quote in PostgreSQL.
 - **A `sqlguard:ignore` inside a string literal no longer suppresses
   anything** ([#66]). The in-SQL directive only had to follow a comment
   marker somewhere earlier in the text, and the marker could itself be inside
@@ -83,6 +89,7 @@ the same version in lockstep.
 [#66]: https://github.com/KARTIKrocks/sqlguard/issues/66
 [#81]: https://github.com/KARTIKrocks/sqlguard/issues/81
 [#91]: https://github.com/KARTIKrocks/sqlguard/issues/91
+[#99]: https://github.com/KARTIKrocks/sqlguard/issues/99
 [#82]: https://github.com/KARTIKrocks/sqlguard/issues/82
 
 ## [0.5.0] - 2026-09-25
