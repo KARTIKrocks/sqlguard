@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       fuzztime:
-        description: "Time per target (go test -fuzztime syntax)"
+        description: "Time per target (go test -fuzztime syntax); keep under 50m"
         default: "10m"
 
 permissions:
@@ -18,7 +18,7 @@ permissions:
 jobs:
   fuzz:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
