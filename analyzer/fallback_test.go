@@ -146,6 +146,15 @@ func TestFallbackParserDollarQuotedBody(t *testing.T) {
 	}
 }
 
+// TestFallbackParserBacktickNonSargable pins that a quoted column still counts
+// as a column under a function.
+func TestFallbackParserBacktickNonSargable(t *testing.T) {
+	st, _ := NewFallbackParser().Parse("SELECT * FROM `t` WHERE YEAR(`d`) = 1")
+	if !st.NonSargablePredicate {
+		t.Error("function on a backtick-quoted column not detected")
+	}
+}
+
 // TestFallbackParserBacktickIdentifiers pins that a backtick-quoted identifier
 // is data: one named like a keyword is not a clause.
 func TestFallbackParserBacktickIdentifiers(t *testing.T) {
@@ -157,6 +166,9 @@ func TestFallbackParserBacktickIdentifiers(t *testing.T) {
 		{"column named limit", "SELECT `limit` FROM t", false, false, false},
 		{"column named order by", "SELECT `order by` FROM t", false, false, false},
 		{"real clauses still seen", "SELECT `a` FROM `where` WHERE `limit` = 1 LIMIT 5", true, true, false},
+		{"doubled backtick", "SELECT * FROM `a``b` WHERE x = 1 LIMIT 1", true, true, false},
+		{"unterminated backtick keeps the rest", "SELECT * FROM t ` WHERE x = 1", true, false, false},
+		{"order by after a quoted table", "SELECT * FROM `t` ORDER BY a", false, false, true},
 		{"backtick inside a string", "SELECT * FROM t WHERE n = '`' LIMIT 1", true, true, false},
 	}
 	for _, c := range cases {
