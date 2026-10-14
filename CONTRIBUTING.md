@@ -44,6 +44,11 @@ Before opening a PR, run `make ci` and make sure it's green.
 - Run a single test: `go test ./middleware/ -run TestName -count=1`.
 - Use `-race` for anything touching `middleware` (the driver chain and
   `QueryTracker` are concurrent).
+- Fuzzing: `go test ./analyzer/ -run '^$' -fuzz '^FuzzRedact$' -fuzztime 1m`
+  (also `FuzzIsMultiStatement`). Under plain `go test` a fuzz target only
+  replays its seeds; the weekly `Fuzz` workflow runs them for real. If it
+  finds a crasher, commit the file under `analyzer/testdata/fuzz/<target>/`
+  and `make test` replays it from then on.
 - After any dependency change, run `make tidy` (tidies all nine modules — tidying
   only the root leaves the others stale).
 

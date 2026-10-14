@@ -9,6 +9,13 @@ the same version in lockstep.
 
 ## [Unreleased]
 
+### Added
+
+- A weekly `Fuzz` workflow runs `FuzzRedact` and a new `FuzzIsMultiStatement`
+  for real ([#83]); under `go test` a fuzz target only replays its seeds. A
+  crasher is uploaded as an artifact to commit under
+  `analyzer/testdata/fuzz/`.
+
 ### Changed
 
 - `golangci-lint` pinned to v2.14.0 (was v2.13.2).
@@ -89,6 +96,7 @@ the same version in lockstep.
 
 [#66]: https://github.com/KARTIKrocks/sqlguard/issues/66
 [#81]: https://github.com/KARTIKrocks/sqlguard/issues/81
+[#83]: https://github.com/KARTIKrocks/sqlguard/issues/83
 [#91]: https://github.com/KARTIKrocks/sqlguard/issues/91
 [#99]: https://github.com/KARTIKrocks/sqlguard/issues/99
 [#82]: https://github.com/KARTIKrocks/sqlguard/issues/82

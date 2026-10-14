@@ -1,6 +1,9 @@
 package analyzer
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // FuzzRedact exercises the literal lexer's index arithmetic — the escape
 // skip, the dollar-quote tag slice, and the two-pass span union — against
@@ -69,4 +72,35 @@ func checkSpans(t *testing.T, name string, spans []span, n int) {
 		}
 		prev = s.hi
 	}
+}
+
+// FuzzIsMultiStatement checks the fail-closed side of the lexer, the one that
+// keeps a smuggled statement away from the EXPLAIN transaction. With no byte
+// that can open a literal or a comment, a ";" followed by more text is a
+// separator by any reading, so IsMultiStatement must report it.
+func FuzzIsMultiStatement(f *testing.F) {
+	for _, s := range []string{
+		``,
+		`;`,
+		`SELECT 1;`,
+		`SELECT 1; DROP TABLE t`,
+		`SELECT $$a; b$$`,
+		`SELECT 'a;' ; DROP TABLE t`,
+		`SELECT $$'$$; DROP TABLE t`,
+		`UPDATE t AS $$ SET id = 1; DROP TABLE t`,
+		"SELECT `a;b`",
+	} {
+		f.Add(s)
+	}
+
+	f.Fuzz(func(t *testing.T, sql string) {
+		got := IsMultiStatement(sql)
+		if strings.ContainsAny(sql, "'\"`$-/#*") {
+			return
+		}
+		_, rest, found := strings.Cut(sql, ";")
+		if want := found && strings.TrimSpace(rest) != ""; got != want {
+			t.Fatalf("IsMultiStatement(%q) = %v, want %v", sql, got, want)
+		}
+	})
 }
