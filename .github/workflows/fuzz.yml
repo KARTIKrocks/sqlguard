@@ -9,6 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       fuzztime:
+        type: string
         description: "Time per target (go test -fuzztime syntax); keep under 50m"
         default: "10m"
 
