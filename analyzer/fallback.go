@@ -794,9 +794,8 @@ func skipBlockComment(s string, i int) int {
 // Callers that must not let a literal hide a statement separator use
 // blankLiterals directly with both dialect readings; see IsMultiStatement.
 //
-// Backtick-quoted identifiers are blanked as well, so a table named `where` is
-// not read as a clause (#99). IsMultiStatement does not, since a backtick is no
-// quote in Postgres and a run of them must not hide a ";".
+// Backtick-quoted identifiers are blanked too. IsMultiStatement does not: a
+// backtick is no quote in Postgres, and a run of them must not hide a ";".
 func blankStringLiterals(s string) string { return blankQuoted(s, true, true) }
 
 // blankLiterals is blankStringLiterals with the dollar-quote reading made
@@ -806,7 +805,6 @@ func blankLiterals(s string, dollarQuotes bool) string {
 	return blankQuoted(s, dollarQuotes, false)
 }
 
-// blankQuoted is blankLiterals with backtick runs optionally blanked too.
 func blankQuoted(s string, dollarQuotes, backticks bool) string {
 	var b strings.Builder
 	b.Grow(len(s))

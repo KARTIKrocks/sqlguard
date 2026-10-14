@@ -147,7 +147,7 @@ func TestFallbackParserDollarQuotedBody(t *testing.T) {
 }
 
 // TestFallbackParserBacktickIdentifiers pins that a backtick-quoted identifier
-// is data: a table or column named like a keyword is not a clause (#99).
+// is data: one named like a keyword is not a clause.
 func TestFallbackParserBacktickIdentifiers(t *testing.T) {
 	cases := []struct {
 		name, sql                 string
