@@ -1,0 +1,49 @@
+name: Fuzz
+
+# Under `go test` a fuzz target only replays its seed corpus, so the targets in
+# analyzer/redact_fuzz_test.go never actually fuzz in CI. This job does, on a
+# schedule so it cannot add minutes to every push.
+on:
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+    inputs:
+      fuzztime:
+        type: string
+        description: "Time per target (go test -fuzztime syntax); keep under 50m"
+        default: "10m"
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [FuzzRedact, FuzzIsMultiStatement]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.27"
+
+      - name: Fuzz ${{ matrix.target }}
+        env:
+          FUZZTIME: ${{ inputs.fuzztime || '10m' }}
+        run: go test ./analyzer/ -run '^$' -fuzz "^${{ matrix.target }}\$" -fuzztime "$FUZZTIME"
+
+      # A crasher is written to analyzer/testdata/fuzz/<target>/. Commit it and
+      # `make test` replays it from then on.
+      - name: Upload crasher
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: crasher-${{ matrix.target }}
+          path: analyzer/testdata/fuzz/${{ matrix.target }}/
+          if-no-files-found: warn
