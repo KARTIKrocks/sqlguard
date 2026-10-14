@@ -30,7 +30,7 @@ the same version in lockstep.
 - **A backtick-quoted identifier is no longer read as a clause** ([#99]).
   The default parser blanked string literals but not backtick runs, so
   ``SELECT * FROM `where` `` counted a `WHERE` and a MySQL table named
-  `limit` counted a `LIMIT`, hiding `select-without-where` and the like.
+  `limit` counted a `LIMIT`, hiding `delete-without-where`, `update-without-where` and `select-without-limit`.
   Backtick runs are now blanked before the clause scan. `IsMultiStatement`
   deliberately does not, since a backtick is no quote in PostgreSQL.
 - **A `sqlguard:ignore` inside a string literal no longer suppresses
