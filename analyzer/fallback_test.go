@@ -146,6 +146,30 @@ func TestFallbackParserDollarQuotedBody(t *testing.T) {
 	}
 }
 
+// TestFallbackParserBacktickIdentifiers pins that a backtick-quoted identifier
+// is data: a table or column named like a keyword is not a clause (#99).
+func TestFallbackParserBacktickIdentifiers(t *testing.T) {
+	cases := []struct {
+		name, sql                 string
+		wantWhere, wantLimit, ord bool
+	}{
+		{"table named where", "SELECT * FROM `where`", false, false, false},
+		{"column named limit", "SELECT `limit` FROM t", false, false, false},
+		{"column named order by", "SELECT `order by` FROM t", false, false, false},
+		{"real clauses still seen", "SELECT `a` FROM `where` WHERE `limit` = 1 LIMIT 5", true, true, false},
+		{"backtick inside a string", "SELECT * FROM t WHERE n = '`' LIMIT 1", true, true, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			st, _ := NewFallbackParser().Parse(c.sql)
+			if st.HasWhere != c.wantWhere || st.HasLimit != c.wantLimit || st.HasOrderBy != c.ord {
+				t.Errorf("where/limit/order = %v/%v/%v, want %v/%v/%v",
+					st.HasWhere, st.HasLimit, st.HasOrderBy, c.wantWhere, c.wantLimit, c.ord)
+			}
+		})
+	}
+}
+
 // TestFallbackScopedWhereLimit pins which WHERE / LIMIT bound a statement's
 // rows (#91): top level, and for a SELECT a derived table, CTE body or
 // parenthesised set-operation operand; never one inside IN (...), a scalar
