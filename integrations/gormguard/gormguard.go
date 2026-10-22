@@ -20,6 +20,7 @@
 package gormguard
 
 import (
+	"sync"
 	"time"
 
 	"github.com/KARTIKrocks/sqlguard/analyzer"
@@ -30,8 +31,10 @@ import (
 // Plugin implements gorm.Plugin and drives every traced statement through
 // the shared sqlguard analysis core.
 type Plugin struct {
-	g    *middleware.Guard
 	opts []middleware.Option
+
+	mu     sync.Mutex
+	guards []*middleware.Guard // one per database the plugin is used on
 }
 
 // Compile-time proof we satisfy gorm.Plugin.
@@ -42,8 +45,11 @@ var _ gorm.Plugin = (*Plugin)(nil)
 // WithParser, WithN1Detection, …) — the same option set the database/sql
 // driver wrapper and pgxguard use, so there is no parallel configuration
 // surface to drift.
+//
+// The guard is built in Initialize, once per database, so it can take that
+// database's dialect.
 func New(opts ...middleware.Option) *Plugin {
-	return &Plugin{g: middleware.NewGuard(opts...), opts: opts}
+	return &Plugin{opts: opts}
 }
 
 // Name implements gorm.Plugin.
@@ -52,7 +58,13 @@ func (p *Plugin) Name() string { return "sqlguard" }
 // ResetN1 clears N+1 tracker state. Call it at a per-request boundary
 // (e.g. end of an HTTP handler) to scope N+1 detection to one unit of work.
 // No-op unless WithN1Detection was passed to New / Register.
-func (p *Plugin) ResetN1() { p.g.ResetN1() }
+func (p *Plugin) ResetN1() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, g := range p.guards {
+		g.ResetN1()
+	}
+}
 
 // Initialize registers before/after callbacks on every GORM callback chain.
 //
@@ -70,11 +82,18 @@ func (p *Plugin) ResetN1() { p.g.ResetN1() }
 // SQL is analyzed in the after-callback because GORM has not yet rendered
 // db.Statement.SQL when the before-callback fires for the ORM chains.
 func (p *Plugin) Initialize(db *gorm.DB) error {
-	// Rebuild the guard now that the dialector is known.
+	// A guard bound to this database, so a plugin used on two databases
+	// shares no guard between them.
+	var d analyzer.Dialect
 	if db.Dialector != nil {
-		d, _ := analyzer.ParseDialect(db.Name())
-		p.g = middleware.NewGuard(append([]middleware.Option{middleware.WithDetectedDialect(d)}, p.opts...)...)
+		d, _ = analyzer.ParseDialect(db.Name())
 	}
+	g := middleware.NewGuard(append([]middleware.Option{middleware.WithDetectedDialect(d)}, p.opts...)...)
+	p.mu.Lock()
+	p.guards = append(p.guards, g)
+	p.mu.Unlock()
+
+	after := func(db *gorm.DB) { analyze(g, db) }
 	cb := db.Callback()
 	registrations := []struct {
 		before, after func(name string, fn func(*gorm.DB)) error
@@ -91,7 +110,7 @@ func (p *Plugin) Initialize(db *gorm.DB) error {
 		if err := r.before("sqlguard:before_"+r.chain, p.before); err != nil {
 			return err
 		}
-		if err := r.after("sqlguard:after_"+r.chain, p.after); err != nil {
+		if err := r.after("sqlguard:after_"+r.chain, after); err != nil {
 			return err
 		}
 	}
@@ -107,7 +126,7 @@ func (p *Plugin) before(db *gorm.DB) {
 	db.Set(startTimeKey, time.Now())
 }
 
-func (p *Plugin) after(db *gorm.DB) {
+func analyze(g *middleware.Guard, db *gorm.DB) {
 	if db.Statement == nil {
 		return
 	}
@@ -117,7 +136,7 @@ func (p *Plugin) after(db *gorm.DB) {
 	}
 
 	// Static rules + N+1 run on every call (matches Observe semantics).
-	p.g.Check(sql)
+	g.Check(sql)
 
 	// Latency is reported only on success — a failed query's duration is
 	// meaningless. This mirrors middleware.Guard.Observe.
@@ -132,7 +151,7 @@ func (p *Plugin) after(db *gorm.DB) {
 	if !ok {
 		return
 	}
-	p.g.CheckLatency(sql, time.Since(start))
+	g.CheckLatency(sql, time.Since(start))
 }
 
 // Register is a convenience function to create and register the plugin.

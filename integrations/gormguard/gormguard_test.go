@@ -213,7 +213,22 @@ func TestUseDetectsDialect(t *testing.T) {
 	if err := db.Use(p); err != nil {
 		t.Fatalf("Use: %v", err)
 	}
-	if d := p.g.Analyzer().Dialect(); d != analyzer.DialectPostgres {
+	if d := p.guards[0].Analyzer().Dialect(); d != analyzer.DialectPostgres {
 		t.Errorf("dialect = %v, want postgres", d)
+	}
+
+	// The same plugin on a second database gets a guard of its own.
+	other, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("gorm.Open: %v", err)
+	}
+	if err := other.Use(p); err != nil {
+		t.Fatalf("Use: %v", err)
+	}
+	if len(p.guards) != 2 || p.guards[0] == p.guards[1] {
+		t.Fatalf("want two distinct guards, got %d", len(p.guards))
+	}
+	if d := p.guards[1].Analyzer().Dialect(); d != analyzer.DialectUnknown {
+		t.Errorf("second database dialect = %v, want unknown", d)
 	}
 }
