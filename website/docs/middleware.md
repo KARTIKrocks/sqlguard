@@ -53,6 +53,8 @@ Every option is a `middleware.Option`. The same set is accepted by every
 | `WithReporter(r reporter.Reporter)` | `reporter.NewConsoleReporter()` (stderr) | Where findings go. `reporter.NewJSONReporter()` is built in; implement `Report([]analyzer.Result)` for anything else. |
 | `WithAnalyzer(a *analyzer.Analyzer)` | `analyzer.Default()` | Replace the rule set — typically `analyzer.DefaultWithProfile(...)` from config, or an analyzer built `WithRawQuery()`. |
 | `WithParser(p analyzer.Parser)` | `analyzer.FallbackParser` | Swap in a real grammar from [`parsers/`](parsers). Applied to whichever analyzer is in use. |
+| `WithDialect(d analyzer.Dialect)` | detected | Set the SQL dialect of the queries _0.6+_. Outranks `dialect:` in the config and anything detected. See [Redaction](redaction#the-dialect-hint). |
+| `WithDetectedDialect(d analyzer.Dialect)` | unknown | The dialect an integration knows from what it wraps _0.6+_. Applies only when nothing else names one. |
 | `WithN1Detection(threshold int, window time.Duration)` | off | Report `n-plus-one` when the same query fingerprint runs `threshold` times within `window`. Takes precedence over `rules.settings.n-plus-one` _0.3+_. See [N+1 detection](n-plus-one). |
 | `WithFindingDedup(window time.Duration)` | `1m` | Report each (rule, fingerprint) pair at most once per window. `0` reports every occurrence. See [Noise control](noise-control). |
 | `WithAnalysisCacheSize(n int)` | `1024` | Memoize static analysis per exact query string in an LRU of `n` entries. `0` disables the cache. |

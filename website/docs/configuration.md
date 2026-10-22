@@ -71,6 +71,10 @@ rules:
 # for local debugging where the query text is trusted.
 redact: true
 
+# SQL dialect of the analyzed queries: postgres or mysql. Usually detected;
+# set it when it can't be. See Redaction.
+# dialect: postgres  # 0.6+
+
 # Runtime middleware: report each (rule, fingerprint) at most once per
 # window. "0" disables and reports every occurrence.
 dedup:
@@ -92,6 +96,7 @@ scan:
 | `rules.severity` | every rule | `info`, `warning`, `critical`, or `off`. |
 | `rules.settings` | rules with tunables | `leading-wildcard.min-length`, `in-list-too-large.max-length`, `large-offset.threshold`, `slow-query.threshold`, `n-plus-one.threshold` / `.window`. See [Rules](rules). |
 | `redact` | all | `false` keeps raw literals in `Result.Query`. See [Redaction](redaction). |
+| `dialect` | all | `postgres` or `mysql` _0.6+_. Overrides a detected dialect; `WithDialect` in Go overrides this. See [Redaction](redaction#the-dialect-hint). |
 | `dedup.window` | middleware, integrations | Go duration or `"0"`. Equivalent to `WithFindingDedup`. |
 | `scan.exclude-paths` | scanner | Regexes matched against the scanned file path. |
 

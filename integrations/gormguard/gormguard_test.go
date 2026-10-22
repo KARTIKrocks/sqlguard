@@ -198,3 +198,25 @@ func TestRegister_ReturnsNoError(t *testing.T) {
 		t.Fatalf("Register: %v", err)
 	}
 }
+
+// pgNamed reports itself as the postgres dialector without needing a server.
+type pgNamed struct{ gorm.Dialector }
+
+func (pgNamed) Name() string { return "postgres" }
+
+func TestRegisterDetectsDialect(t *testing.T) {
+	db, err := gorm.Open(pgNamed{sqlite.Open(":memory:")}, &gorm.Config{})
+	if err != nil {
+		t.Fatalf("gorm.Open: %v", err)
+	}
+	if err := Register(db); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	p, ok := db.Plugins["sqlguard"].(*Plugin)
+	if !ok {
+		t.Fatal("plugin not registered")
+	}
+	if d := p.g.Analyzer().Dialect(); d != analyzer.DialectPostgres {
+		t.Errorf("dialect = %v, want postgres", d)
+	}
+}

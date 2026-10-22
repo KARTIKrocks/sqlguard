@@ -30,6 +30,7 @@ import (
 	"context"
 	"database/sql"
 
+	"github.com/KARTIKrocks/sqlguard/analyzer"
 	"github.com/KARTIKrocks/sqlguard/middleware"
 	"github.com/jmoiron/sqlx"
 )
@@ -51,6 +52,9 @@ func WrapSqlx(db *sqlx.DB, opts ...middleware.Option) *WrappedDB {
 	if db == nil {
 		panic("sqlxguard: WrapSqlx called with nil *sqlx.DB")
 	}
+	// sqlx knows the driver name ("pgx", "postgres", "mysql", …).
+	d, _ := analyzer.ParseDialect(db.DriverName())
+	opts = append([]middleware.Option{middleware.WithDetectedDialect(d)}, opts...)
 	return &WrappedDB{db: db, g: middleware.NewGuard(opts...)}
 }
 

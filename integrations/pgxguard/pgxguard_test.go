@@ -245,3 +245,12 @@ func TestApplyPool_NilConfigPanics(t *testing.T) {
 	}()
 	ApplyPool(nil)
 }
+
+func TestTracerDialect(t *testing.T) {
+	if d := NewTracer().g.Analyzer().Dialect(); d != analyzer.DialectPostgres {
+		t.Errorf("dialect = %v, want postgres", d)
+	}
+	if d := NewTracer(middleware.WithDialect(analyzer.DialectMySQL)).g.Analyzer().Dialect(); d != analyzer.DialectMySQL {
+		t.Errorf("WithDialect lost to the detected dialect: %v", d)
+	}
+}

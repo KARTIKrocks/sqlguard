@@ -44,6 +44,8 @@ type Analyzer struct {
 	// rawQuery, when true, leaves Result.Query unredacted. Default is false
 	// (redact): the safe default for a tool whose findings flow into logs.
 	rawQuery bool
+	// dialect is the hint for the literal lexer; DialectUnknown hedges.
+	dialect Dialect
 }
 
 // New creates an Analyzer with the given anonymous rules, using the
@@ -60,15 +62,30 @@ func New(rules ...Rule) *Analyzer {
 }
 
 // WithParser returns a copy of the Analyzer that uses the given Parser.
-// Passing nil resets it to the FallbackParser.
+// Passing nil resets it to the FallbackParser. A parser for one dialect
+// (pgparser, mysqlparser) also sets the dialect, unless one is already set.
 func (a *Analyzer) WithParser(p Parser) *Analyzer {
 	if p == nil {
 		p = NewFallbackParser()
 	}
 	cp := *a
 	cp.parser = p
+	if dp, ok := p.(dialectParser); ok && cp.dialect == DialectUnknown {
+		cp.dialect = dp.Dialect()
+	}
 	return &cp
 }
+
+// WithDialect returns a copy of the Analyzer that treats its queries as
+// written in d. It replaces any dialect already set.
+func (a *Analyzer) WithDialect(d Dialect) *Analyzer {
+	cp := *a
+	cp.dialect = d
+	return &cp
+}
+
+// Dialect reports the Analyzer's dialect, DialectUnknown if none is set.
+func (a *Analyzer) Dialect() Dialect { return a.dialect }
 
 // WithRawQuery returns a copy of the Analyzer that leaves Result.Query
 // unredacted (the raw SQL, literals and all). Redaction is on by default so
@@ -149,6 +166,7 @@ func DefaultWithProfile(p Profile) *Analyzer {
 		disabled: disabled,
 		settings: settings,
 		rawQuery: p.RawQuery,
+		dialect:  p.Dialect,
 	}
 }
 

@@ -84,6 +84,30 @@ sqlguard does not redact it. Preserving quoted identifiers is what keeps
 ORM-generated SQL readable in a finding, so the trade is deliberate. On MySQL,
 use `'…'` or bind parameters for values you want redacted.
 
+### The dialect hint
+
+_Added in 0.6._ Both gaps above exist because the lexer does not know the
+dialect. An analyzer now carries one (`analyzer.Dialect`: unknown, `postgres`
+or `mysql`), resolved once when it is built. In 0.6 it is recorded but does
+not yet change what `Redact` produces; the double-quote and backslash cases
+above are what it is for.
+
+You rarely set it yourself. In order, the first of these that names a
+dialect wins:
+
+1. `middleware.WithDialect(d)` in Go.
+2. `dialect:` in [`.sqlguard.yml`](configuration).
+3. A single-dialect parser: `pgparser` or `mysqlparser`.
+4. Detection: the `pgx`, `lib/pq` and `go-sql-driver/mysql` drivers behind
+   `Register`, `OpenDB`, `WrapDriver` and `WrapConnector`; `pgxguard`
+   (always Postgres); `sqlxguard` and `entguard` from the driver name; and
+   `gormguard.Register` from the dialector. `bunguard`, `xormguard` and
+   `gormguard.New` cannot see the database when they are built, so pass
+   `WithDialect` there.
+
+A driver behind another wrapper, or SQLite, stays unknown, which keeps the
+dialect-agnostic behaviour described above.
+
 `Result.Query` is set from `Redact` centrally in `Analyzer.Analyze`, and the
 findings built outside the rule path — `slow-query` and `n-plus-one` — go
 through `Analyzer.PrepareQuery`, which applies the same policy. There is one

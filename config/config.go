@@ -39,6 +39,9 @@ type Config struct {
 	// key means "use the safe default" (redact). Set `redact: false` only
 	// when the query text is trusted (local debugging).
 	Redact *bool `yaml:"redact"`
+	// Dialect names the SQL dialect of the analyzed queries ("postgres",
+	// "mysql"). Unset leaves it to detection.
+	Dialect string `yaml:"dialect"`
 
 	warnings []string
 }
@@ -194,6 +197,12 @@ func (c *Config) Profile() (analyzer.Profile, error) {
 		}
 		return true, nil
 	}
+
+	d, err := c.dialect(warn)
+	if err != nil {
+		return p, err
+	}
+	p.Dialect = d
 
 	if err := collectNames(c.Rules.Disable, p.Disabled, checkName); err != nil {
 		return p, err
@@ -454,6 +463,19 @@ func sortedKeys(m map[string]settingKind) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// dialect resolves the `dialect:` key. An unknown name warns (or fails under
+// strict) and leaves the dialect unknown.
+func (c *Config) dialect(warn func(string, ...any) error) (analyzer.Dialect, error) {
+	if c.Dialect == "" {
+		return analyzer.DialectUnknown, nil
+	}
+	d, ok := analyzer.ParseDialect(c.Dialect)
+	if !ok {
+		return d, warn("unknown dialect %q (known: postgres, mysql)", c.Dialect)
+	}
+	return d, nil
 }
 
 // rawQuery reports whether Result.Query redaction is disabled. Redaction is

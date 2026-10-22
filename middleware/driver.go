@@ -69,13 +69,19 @@ func OpenDB(c driver.Connector, opts ...Option) *sql.DB {
 // through it. The returned driver also implements driver.DriverContext so
 // connector-based pooling is preserved.
 func WrapDriver(base driver.Driver, opts ...Option) driver.Driver {
-	return &wDriver{base: base, g: NewGuard(opts...)}
+	return &wDriver{base: base, g: NewGuard(withDriverDialect(base, opts)...)}
 }
 
 // WrapConnector returns a driver.Connector that analyzes every query
 // executed through connections it produces.
 func WrapConnector(base driver.Connector, opts ...Option) driver.Connector {
-	return &wConnector{base: base, g: NewGuard(opts...)}
+	return &wConnector{base: base, g: NewGuard(withDriverDialect(base.Driver(), opts)...)}
+}
+
+// withDriverDialect puts the dialect detected from the base driver ahead of
+// opts, so a caller's own WithDetectedDialect still wins.
+func withDriverDialect(base driver.Driver, opts []Option) []Option {
+	return append([]Option{WithDetectedDialect(driverDialect(base))}, opts...)
 }
 
 // ---- driver.Driver / driver.DriverContext ----

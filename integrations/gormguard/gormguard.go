@@ -22,6 +22,7 @@ package gormguard
 import (
 	"time"
 
+	"github.com/KARTIKrocks/sqlguard/analyzer"
 	"github.com/KARTIKrocks/sqlguard/middleware"
 	"gorm.io/gorm"
 )
@@ -128,7 +129,12 @@ func (p *Plugin) after(db *gorm.DB) {
 	p.g.CheckLatency(sql, time.Since(start))
 }
 
-// Register is a convenience function to create and register the plugin.
+// Register is a convenience function to create and register the plugin. It
+// also takes the dialect from db's dialector, which New cannot see.
 func Register(db *gorm.DB, opts ...middleware.Option) error {
+	if db.Dialector != nil {
+		d, _ := analyzer.ParseDialect(db.Name())
+		opts = append([]middleware.Option{middleware.WithDetectedDialect(d)}, opts...)
+	}
 	return db.Use(New(opts...))
 }

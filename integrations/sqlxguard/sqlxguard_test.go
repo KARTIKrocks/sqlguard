@@ -185,3 +185,18 @@ func TestWrapSqlx_NilPanics(t *testing.T) {
 	}()
 	WrapSqlx(nil)
 }
+
+func TestWrapSqlxDetectsDialect(t *testing.T) {
+	sqlxDB, err := sqlx.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("sqlx.Open: %v", err)
+	}
+	defer sqlxDB.Close()
+	if d := WrapSqlx(sqlxDB).g.Analyzer().Dialect(); d != analyzer.DialectUnknown {
+		t.Errorf("sqlite3 dialect = %v, want unknown", d)
+	}
+	pg := sqlx.NewDb(sqlxDB.DB, "pgx")
+	if d := WrapSqlx(pg).g.Analyzer().Dialect(); d != analyzer.DialectPostgres {
+		t.Errorf("pgx dialect = %v, want postgres", d)
+	}
+}

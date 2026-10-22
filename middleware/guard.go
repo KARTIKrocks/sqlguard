@@ -59,6 +59,7 @@ func NewGuard(opts ...Option) *Guard {
 	if o.parser != nil {
 		o.analyzer = o.analyzer.WithParser(o.parser)
 	}
+	resolveDialect(&o)
 	// Profile settings feed the thresholds unless a Go option named one
 	// explicitly, so `rules.settings` works the same for these findings as
 	// for any statement rule.

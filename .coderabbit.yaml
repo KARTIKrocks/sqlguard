@@ -90,6 +90,16 @@ reviews:
         Flag any change that drops a reading, makes the two lexers disagree, or
         removes TestRedactNoLeakAcrossDialectAmbiguity /
         TestIsMultiStatementNeedsBothReadings.
+        analyzer.Dialect is a hint for that lexer, resolved once at construction,
+        never per query. Precedence: middleware.WithDialect, then the
+        Analyzer's own (config `dialect:`, then a single-dialect parser, which
+        fills it only while unknown), then WithDetectedDialect. DialectUnknown
+        must keep today's output byte for byte, and a known dialect may only
+        drop a hedge where it makes the answer certain: never leave a literal
+        byte the unknown scan would redact, never miss a ';' it would catch.
+        Server settings (ANSI_QUOTES, standard_conforming_strings=off) still
+        vary quoting under a known dialect, so such a reading must be safe
+        under them too or be opt-in.
         An in-SQL sqlguard:ignore directive counts only inside a comment span:
         parseIgnoreDirective lexes the SQL and matches the directive only in
         comment text, because a regex anchored on a comment marker also matched
