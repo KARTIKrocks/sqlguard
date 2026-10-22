@@ -204,17 +204,14 @@ type pgNamed struct{ gorm.Dialector }
 
 func (pgNamed) Name() string { return "postgres" }
 
-func TestRegisterDetectsDialect(t *testing.T) {
+func TestUseDetectsDialect(t *testing.T) {
 	db, err := gorm.Open(pgNamed{sqlite.Open(":memory:")}, &gorm.Config{})
 	if err != nil {
 		t.Fatalf("gorm.Open: %v", err)
 	}
-	if err := Register(db); err != nil {
-		t.Fatalf("Register: %v", err)
-	}
-	p, ok := db.Plugins["sqlguard"].(*Plugin)
-	if !ok {
-		t.Fatal("plugin not registered")
+	p := New()
+	if err := db.Use(p); err != nil {
+		t.Fatalf("Use: %v", err)
 	}
 	if d := p.g.Analyzer().Dialect(); d != analyzer.DialectPostgres {
 		t.Errorf("dialect = %v, want postgres", d)

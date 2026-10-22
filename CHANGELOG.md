@@ -16,7 +16,7 @@ the same version in lockstep.
   [#62], [#64] and [#65] build on. Set it with `middleware.WithDialect`, the
   `dialect:` config key or `Analyzer.WithDialect`; otherwise `pgparser`,
   `mysqlparser`, the `pgx`, `lib/pq` and `go-sql-driver/mysql` drivers,
-  `pgxguard`, `sqlxguard`, `entguard` and `gormguard.Register` supply it.
+  `pgxguard`, `sqlxguard`, `entguard` and `gormguard` supply it.
   Integrations pass what they know through `middleware.WithDetectedDialect`.
   Nothing uses it yet: redaction output is unchanged.
 - A weekly `Fuzz` workflow runs `FuzzRedact` and a new `FuzzIsMultiStatement`

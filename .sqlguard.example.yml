@@ -71,7 +71,7 @@ redact: true
 # SQL dialect of the analyzed queries: postgres or mysql (0.6+). It tells the
 # redaction lexer how quotes and escapes behave. Usually unnecessary: the
 # pgx, lib/pq and go-sql-driver/mysql drivers, pgxguard, entguard, sqlxguard,
-# gormguard.Register and the pgparser/mysqlparser parsers detect it. Set it
+# gormguard and the pgparser/mysqlparser parsers detect it. Set it
 # when they can't, e.g. behind another driver wrapper. WithDialect in Go wins
 # over this.
 # dialect: postgres

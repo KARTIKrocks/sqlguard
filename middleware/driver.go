@@ -75,7 +75,11 @@ func WrapDriver(base driver.Driver, opts ...Option) driver.Driver {
 // WrapConnector returns a driver.Connector that analyzes every query
 // executed through connections it produces.
 func WrapConnector(base driver.Connector, opts ...Option) driver.Connector {
-	return &wConnector{base: base, g: NewGuard(withDriverDialect(base.Driver(), opts)...)}
+	var drv driver.Driver
+	if base != nil {
+		drv = base.Driver()
+	}
+	return &wConnector{base: base, g: NewGuard(withDriverDialect(drv, opts)...)}
 }
 
 // withDriverDialect puts the dialect detected from the base driver ahead of

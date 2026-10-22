@@ -19,10 +19,13 @@ func WithDialect(d analyzer.Dialect) Option {
 
 // WithDetectedDialect sets the dialect an integration knows from the driver or
 // ORM it wraps. It applies only when neither WithDialect, the config file nor
-// a single-dialect parser names one.
+// a single-dialect parser names one. DialectUnknown is ignored, so a failed
+// detection never clears a successful one.
 func WithDetectedDialect(d analyzer.Dialect) Option {
 	return func(o *options) {
-		o.detectedDialect = d
+		if d != analyzer.DialectUnknown {
+			o.detectedDialect = d
+		}
 	}
 }
 

@@ -16,7 +16,7 @@ const (
 	DialectMySQL
 )
 
-// String returns the dialect's config name: "postgres", "mysql" or "unknown".
+// String returns "postgres", "mysql" (the config names) or "unknown".
 func (d Dialect) String() string {
 	switch d {
 	case DialectPostgres:
@@ -34,9 +34,10 @@ func (d Dialect) String() string {
 // else, including "unknown".
 func ParseDialect(name string) (Dialect, bool) {
 	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "postgres", "postgresql", "pg", "pgx":
+	case "postgres", "postgresql", "pg", "pgx", "pgx/v4", "pgx/v5",
+		"cloudsqlpostgres", "nrpostgres":
 		return DialectPostgres, true
-	case "mysql", "mariadb":
+	case "mysql", "mariadb", "nrmysql":
 		return DialectMySQL, true
 	default:
 		return DialectUnknown, false

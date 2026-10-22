@@ -11,6 +11,7 @@ func TestParseDialect(t *testing.T) {
 		{"postgres", DialectPostgres, true},
 		{" PostgreSQL ", DialectPostgres, true},
 		{"pgx", DialectPostgres, true},
+		{"pgx/v5", DialectPostgres, true},
 		{"mysql", DialectMySQL, true},
 		{"MariaDB", DialectMySQL, true},
 		{"sqlite3", DialectUnknown, false},
@@ -50,5 +51,11 @@ func TestAnalyzerDialect(t *testing.T) {
 	}
 	if d := Default().WithParser(&pgOnlyParser{}).WithDialect(DialectMySQL).Dialect(); d != DialectMySQL {
 		t.Errorf("WithDialect did not replace: %v", d)
+	}
+	if d := Default().WithParser(&pgOnlyParser{}).WithParser(nil).Dialect(); d != DialectUnknown {
+		t.Errorf("parser dialect outlived its parser: %v", d)
+	}
+	if d := DefaultWithProfile(Profile{Dialect: DialectMySQL}).WithParser(&pgOnlyParser{}).Dialect(); d != DialectMySQL {
+		t.Errorf("parser overrode the profile dialect: %v", d)
 	}
 }

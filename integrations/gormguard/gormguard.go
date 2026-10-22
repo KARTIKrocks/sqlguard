@@ -30,7 +30,8 @@ import (
 // Plugin implements gorm.Plugin and drives every traced statement through
 // the shared sqlguard analysis core.
 type Plugin struct {
-	g *middleware.Guard
+	g    *middleware.Guard
+	opts []middleware.Option
 }
 
 // Compile-time proof we satisfy gorm.Plugin.
@@ -42,7 +43,7 @@ var _ gorm.Plugin = (*Plugin)(nil)
 // driver wrapper and pgxguard use, so there is no parallel configuration
 // surface to drift.
 func New(opts ...middleware.Option) *Plugin {
-	return &Plugin{g: middleware.NewGuard(opts...)}
+	return &Plugin{g: middleware.NewGuard(opts...), opts: opts}
 }
 
 // Name implements gorm.Plugin.
@@ -69,6 +70,11 @@ func (p *Plugin) ResetN1() { p.g.ResetN1() }
 // SQL is analyzed in the after-callback because GORM has not yet rendered
 // db.Statement.SQL when the before-callback fires for the ORM chains.
 func (p *Plugin) Initialize(db *gorm.DB) error {
+	// Rebuild the guard now that the dialector is known.
+	if db.Dialector != nil {
+		d, _ := analyzer.ParseDialect(db.Name())
+		p.g = middleware.NewGuard(append([]middleware.Option{middleware.WithDetectedDialect(d)}, p.opts...)...)
+	}
 	cb := db.Callback()
 	registrations := []struct {
 		before, after func(name string, fn func(*gorm.DB)) error
@@ -129,12 +135,7 @@ func (p *Plugin) after(db *gorm.DB) {
 	p.g.CheckLatency(sql, time.Since(start))
 }
 
-// Register is a convenience function to create and register the plugin. It
-// also takes the dialect from db's dialector, which New cannot see.
+// Register is a convenience function to create and register the plugin.
 func Register(db *gorm.DB, opts ...middleware.Option) error {
-	if db.Dialector != nil {
-		d, _ := analyzer.ParseDialect(db.Name())
-		opts = append([]middleware.Option{middleware.WithDetectedDialect(d)}, opts...)
-	}
 	return db.Use(New(opts...))
 }

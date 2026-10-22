@@ -101,9 +101,8 @@ dialect wins:
 4. Detection: the `pgx`, `lib/pq` and `go-sql-driver/mysql` drivers behind
    `Register`, `OpenDB`, `WrapDriver` and `WrapConnector`; `pgxguard`
    (always Postgres); `sqlxguard` and `entguard` from the driver name; and
-   `gormguard.Register` from the dialector. `bunguard`, `xormguard` and
-   `gormguard.New` cannot see the database when they are built, so pass
-   `WithDialect` there.
+   `gormguard` from the dialector. `bunguard` and `xormguard` cannot see the
+   database when they are built, so pass `WithDialect` there.
 
 A driver behind another wrapper, or SQLite, stays unknown, which keeps the
 dialect-agnostic behaviour described above.

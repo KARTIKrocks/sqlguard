@@ -45,7 +45,9 @@ type Analyzer struct {
 	// (redact): the safe default for a tool whose findings flow into logs.
 	rawQuery bool
 	// dialect is the hint for the literal lexer; DialectUnknown hedges.
-	dialect Dialect
+	// dialectSet records an explicit choice, which a parser cannot replace.
+	dialect    Dialect
+	dialectSet bool
 }
 
 // New creates an Analyzer with the given anonymous rules, using the
@@ -62,16 +64,20 @@ func New(rules ...Rule) *Analyzer {
 }
 
 // WithParser returns a copy of the Analyzer that uses the given Parser.
-// Passing nil resets it to the FallbackParser. A parser for one dialect
-// (pgparser, mysqlparser) also sets the dialect, unless one is already set.
+// Passing nil resets it to the FallbackParser. Unless a dialect was set
+// explicitly, the dialect follows the parser: a single-dialect parser
+// (pgparser, mysqlparser) sets it, and any other parser clears it.
 func (a *Analyzer) WithParser(p Parser) *Analyzer {
 	if p == nil {
 		p = NewFallbackParser()
 	}
 	cp := *a
 	cp.parser = p
-	if dp, ok := p.(dialectParser); ok && cp.dialect == DialectUnknown {
-		cp.dialect = dp.Dialect()
+	if !cp.dialectSet {
+		cp.dialect = DialectUnknown
+		if dp, ok := p.(dialectParser); ok {
+			cp.dialect = dp.Dialect()
+		}
 	}
 	return &cp
 }
@@ -81,6 +87,7 @@ func (a *Analyzer) WithParser(p Parser) *Analyzer {
 func (a *Analyzer) WithDialect(d Dialect) *Analyzer {
 	cp := *a
 	cp.dialect = d
+	cp.dialectSet = true
 	return &cp
 }
 
@@ -160,13 +167,14 @@ func DefaultWithProfile(p Profile) *Analyzer {
 		maps.Copy(settings, p.Settings)
 	}
 	return &Analyzer{
-		rules:    bound,
-		parser:   NewFallbackParser(),
-		severity: sev,
-		disabled: disabled,
-		settings: settings,
-		rawQuery: p.RawQuery,
-		dialect:  p.Dialect,
+		rules:      bound,
+		parser:     NewFallbackParser(),
+		severity:   sev,
+		disabled:   disabled,
+		settings:   settings,
+		rawQuery:   p.RawQuery,
+		dialect:    p.Dialect,
+		dialectSet: p.Dialect != DialectUnknown,
 	}
 }
 

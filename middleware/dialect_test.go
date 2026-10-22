@@ -25,6 +25,7 @@ func TestGuardDialectPrecedence(t *testing.T) {
 	}{
 		{"none", nil, analyzer.DialectUnknown},
 		{"detected", []Option{WithDetectedDialect(pg)}, pg},
+		{"unknown detection keeps a known one", []Option{WithDetectedDialect(pg), WithDetectedDialect(analyzer.DialectUnknown)}, pg},
 		{"parser beats detected", []Option{WithDetectedDialect(pg), WithParser(&mysqlOnlyParser{})}, my},
 		{"config beats parser", []Option{WithAnalyzer(fromConfig), WithParser(&mysqlOnlyParser{})}, pg},
 		{"config beats detected", []Option{WithAnalyzer(fromConfig), WithDetectedDialect(my)}, pg},
