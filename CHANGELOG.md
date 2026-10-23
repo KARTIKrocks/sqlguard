@@ -28,7 +28,7 @@ the same version in lockstep.
 - **Breaking (Go API): `middleware.NewQueryTracker` takes the fingerprint
   function first**, `NewQueryTracker(fingerprint, threshold, window,
   severity, reportFn)`. Pass the analyzer's `Fingerprint` so N+1 groups by
-  its dialect; `nil` uses the dialect-blind `analyzer.Fingerprint`.
+  its dialect.
 - `golangci-lint` pinned to v2.14.0 (was v2.13.2).
 
 ### Fixed

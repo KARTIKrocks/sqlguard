@@ -32,13 +32,10 @@ type QueryTracker struct {
 // NewQueryTracker creates a tracker that flags when the same query pattern
 // appears more than threshold times within the given window. fingerprint
 // groups and reports each query; pass the Analyzer's Fingerprint so the
-// dialect is honoured, or nil for the dialect-blind analyzer.Fingerprint.
+// dialect is honoured.
 // severity is the one to report, which Guard resolves from the profile so a
 // `severity:` override on `n-plus-one` reaches the finding.
 func NewQueryTracker(fingerprint func(string) string, threshold int, window time.Duration, severity analyzer.Severity, reportFn func([]analyzer.Result)) *QueryTracker {
-	if fingerprint == nil {
-		fingerprint = analyzer.Fingerprint
-	}
 	return &QueryTracker{
 		queries:     make(map[string]*queryRecord),
 		threshold:   threshold,

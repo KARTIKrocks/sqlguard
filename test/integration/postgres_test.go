@@ -143,7 +143,7 @@ func TestPostgres_IssuesCarryFingerprint(t *testing.T) {
 	if len(res.Issues) == 0 {
 		t.Fatal("expected at least one issue")
 	}
-	want := analyzer.Fingerprint(q)
+	want := analyzer.New().WithDialect(analyzer.DialectPostgres).Fingerprint(q)
 	for _, r := range res.Issues {
 		if r.Fingerprint != want {
 			t.Errorf("Fingerprint = %q, want %q", r.Fingerprint, want)

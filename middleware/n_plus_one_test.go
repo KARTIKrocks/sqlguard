@@ -10,7 +10,7 @@ import (
 
 func TestQueryTracker_DetectsN1(t *testing.T) {
 	var reported []analyzer.Result
-	tracker := NewQueryTracker(nil, 3, 5*time.Second, analyzer.SeverityWarning, func(results []analyzer.Result) {
+	tracker := NewQueryTracker(analyzer.Fingerprint, 3, 5*time.Second, analyzer.SeverityWarning, func(results []analyzer.Result) {
 		reported = append(reported, results...)
 	})
 
@@ -29,7 +29,7 @@ func TestQueryTracker_DetectsN1(t *testing.T) {
 
 func TestQueryTracker_DifferentPatterns(t *testing.T) {
 	var reported []analyzer.Result
-	tracker := NewQueryTracker(nil, 3, 5*time.Second, analyzer.SeverityWarning, func(results []analyzer.Result) {
+	tracker := NewQueryTracker(analyzer.Fingerprint, 3, 5*time.Second, analyzer.SeverityWarning, func(results []analyzer.Result) {
 		reported = append(reported, results...)
 	})
 
@@ -45,7 +45,7 @@ func TestQueryTracker_DifferentPatterns(t *testing.T) {
 
 func TestQueryTracker_BelowThreshold(t *testing.T) {
 	var reported []analyzer.Result
-	tracker := NewQueryTracker(nil, 5, 5*time.Second, analyzer.SeverityWarning, func(results []analyzer.Result) {
+	tracker := NewQueryTracker(analyzer.Fingerprint, 5, 5*time.Second, analyzer.SeverityWarning, func(results []analyzer.Result) {
 		reported = append(reported, results...)
 	})
 
@@ -61,7 +61,7 @@ func TestQueryTracker_BelowThreshold(t *testing.T) {
 
 func TestQueryTracker_ReportsOnlyOnce(t *testing.T) {
 	var reported []analyzer.Result
-	tracker := NewQueryTracker(nil, 2, 5*time.Second, analyzer.SeverityWarning, func(results []analyzer.Result) {
+	tracker := NewQueryTracker(analyzer.Fingerprint, 2, 5*time.Second, analyzer.SeverityWarning, func(results []analyzer.Result) {
 		reported = append(reported, results...)
 	})
 
@@ -77,7 +77,7 @@ func TestQueryTracker_ReportsOnlyOnce(t *testing.T) {
 
 func TestQueryTracker_Reset(t *testing.T) {
 	var reported []analyzer.Result
-	tracker := NewQueryTracker(nil, 2, 5*time.Second, analyzer.SeverityWarning, func(results []analyzer.Result) {
+	tracker := NewQueryTracker(analyzer.Fingerprint, 2, 5*time.Second, analyzer.SeverityWarning, func(results []analyzer.Result) {
 		reported = append(reported, results...)
 	})
 
@@ -98,7 +98,7 @@ func TestQueryTracker_Reset(t *testing.T) {
 
 func TestQueryTracker_BoundedAtMaxKeys(t *testing.T) {
 	// High threshold so nothing reports, long window so nothing expires.
-	qt := NewQueryTracker(nil, 1000, time.Hour, analyzer.SeverityWarning, func([]analyzer.Result) {})
+	qt := NewQueryTracker(analyzer.Fingerprint, 1000, time.Hour, analyzer.SeverityWarning, func([]analyzer.Result) {})
 	qt.maxKeys = 3
 
 	// Distinct query *shapes* (distinct column names → distinct fingerprints),
@@ -114,7 +114,7 @@ func TestQueryTracker_BoundedAtMaxKeys(t *testing.T) {
 
 func TestQueryTracker_TrackedKeyHonoredAtCap(t *testing.T) {
 	var reports int
-	qt := NewQueryTracker(nil, 3, time.Hour, analyzer.SeverityWarning, func([]analyzer.Result) { reports++ })
+	qt := NewQueryTracker(analyzer.Fingerprint, 3, time.Hour, analyzer.SeverityWarning, func([]analyzer.Result) { reports++ })
 	qt.maxKeys = 2
 
 	// "cola" gets tracked to count 2 (below threshold), then the cap fills.

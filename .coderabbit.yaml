@@ -101,7 +101,8 @@ reviews:
         dialect unknown only identifier-shaped ones are kept. The N+1 key must
         be the guard's Analyzer.Fingerprint, not the dialect-blind package
         Fingerprint, and explain fingerprints in its connected dialect.
-        FuzzRedact pins the narrowing direction per reading.
+        A Postgres "..." name never honours a backslash escape, in either
+        reading; FuzzRedact pins it and the MySQL narrowing direction.
         Server settings (ANSI_QUOTES, standard_conforming_strings=off) still
         vary quoting under a known dialect, so such a reading must be safe
         under them too or be opt-in.

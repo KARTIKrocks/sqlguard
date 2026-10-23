@@ -191,7 +191,8 @@ func literalSpans(s string, backslashEscapes bool, d Dialect) (redact, keep []sp
 			redact = append(redact, span{i, j})
 			i = j
 		case '"':
-			j, closed := scanQuotedRunClosed(s, i, backslashEscapes)
+			// A Postgres "..." is a name, which has no backslash escapes.
+			j, closed := scanQuotedRunClosed(s, i, backslashEscapes && d != DialectPostgres)
 			if closed && doubleQuotedIsIdent(s[i+1:j-1], d) {
 				keep = append(keep, span{i, j})
 			} else {

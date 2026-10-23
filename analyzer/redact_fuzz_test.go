@@ -1,6 +1,7 @@
 package analyzer
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -36,6 +37,7 @@ func FuzzRedact(f *testing.F) {
 		`SELECT a -- $$ b`,
 		`SELECT "id", ` + "`n`" + ` FROM t WHERE s = 'O''B'`,
 		`SELECT "a\", E'x\'' , 'secret' FROM t`,
+		`SELECT "a\", E'x\' secret' FROM t WHERE "z" = 1`,
 		`SELECT "weird;col", "a""b" FROM t WHERE n = "sk_live_51Habc123"`,
 	}
 	for _, s := range seeds {
@@ -64,31 +66,32 @@ func FuzzRedact(f *testing.F) {
 	})
 }
 
-// checkDialectsNarrowOnly pins, per backslash reading, that MySQL redacts every
-// byte the unknown dialect does and Postgres keeps one only inside a "..." name.
+// checkDialectsNarrowOnly pins that MySQL redacts every byte the unknown
+// dialect does, and that Postgres differs from it only in "..." names, which
+// end at the first undoubled quote under either backslash reading. Digits are
+// skipped: outside a span Redact's walk decides them.
 func checkDialectsNarrowOnly(t *testing.T, s string) {
 	t.Helper()
 	n := len(s)
+	unknown, _ := redactSpans(s, DialectUnknown)
+	u := spanMask(unknown, n)
+	my, _ := redactSpans(s, DialectMySQL)
+	m := spanMask(my, n)
+	for i := range n {
+		if u[i] && !m[i] && !isDigit(s[i]) {
+			t.Fatalf("mysql keeps byte %d of %q, which the unknown dialect redacts", i, s)
+		}
+	}
+
+	pg, _ := redactSpans(s, DialectPostgres)
+	if !strings.Contains(s, `"`) && !slices.Equal(pg, unknown) {
+		t.Fatalf("postgres redacts %v of %q, unknown %v", pg, s, unknown)
+	}
 	for _, backslash := range []bool{false, true} {
-		unknown, _ := literalSpans(s, backslash, DialectUnknown)
-		my, myKeep := literalSpans(s, backslash, DialectMySQL)
-		pg, pgKeep := literalSpans(s, backslash, DialectPostgres)
-		for name, spans := range map[string][]span{"mysql redact": my, "mysql keep": myKeep, "postgres redact": pg, "postgres keep": pgKeep} {
-			checkSpans(t, name, spans, n)
-		}
-		var names []span
-		for _, sp := range pgKeep {
-			if s[sp.lo] == '"' {
-				names = append(names, sp)
-			}
-		}
-		u, m, p, pn := spanMask(unknown, n), spanMask(my, n), spanMask(pg, n), spanMask(names, n)
-		for i := range n {
-			if u[i] && !m[i] {
-				t.Fatalf("MySQL keeps byte %d of %q, which the unknown dialect redacts", i, s)
-			}
-			if u[i] && !p[i] && !pn[i] {
-				t.Fatalf("Postgres keeps byte %d of %q outside a quoted name", i, s)
+		_, keep := literalSpans(s, backslash, DialectPostgres)
+		for _, sp := range keep {
+			if s[sp.lo] == '"' && strings.Contains(strings.ReplaceAll(s[sp.lo+1:sp.hi-1], `""`, ""), `"`) {
+				t.Fatalf("postgres name %q in %q runs past its closing quote", s[sp.lo:sp.hi], s)
 			}
 		}
 	}

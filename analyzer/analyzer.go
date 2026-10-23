@@ -229,6 +229,7 @@ func (a *Analyzer) Analyze(query string) []Result {
 
 	// Redacted lazily: most queries have no findings.
 	var display, fingerprint string
+	prepared := false
 
 	results := make([]Result, 0, len(a.rules))
 	for _, br := range a.rules {
@@ -253,8 +254,9 @@ func (a *Analyzer) Analyze(query string) []Result {
 				r.Severity = s
 			}
 		}
-		if fingerprint == "" {
+		if !prepared {
 			display, fingerprint = a.PrepareQuery(query)
+			prepared = true
 		}
 		r.Query = display
 		r.Fingerprint = fingerprint

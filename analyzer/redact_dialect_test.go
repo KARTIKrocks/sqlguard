@@ -73,6 +73,15 @@ func TestRedactMySQLDoubleQuotesNoLeakAcrossBackslash(t *testing.T) {
 
 // TestAnalyzerUsesItsDialect pins that every surface reading the analyzer —
 // Analyze, PrepareQuery and Fingerprint — redacts in its dialect.
+// TestRedactPostgresNameEndsAtItsQuote pins that a backslash never escapes the
+// closing quote of a Postgres name, which would swallow the E'...' after it.
+func TestRedactPostgresNameEndsAtItsQuote(t *testing.T) {
+	sql := `SELECT "a\", E'x\' secret' FROM t WHERE "z" = 1`
+	if got := redact(sql, DialectPostgres); strings.Contains(got, "secret") {
+		t.Errorf("leaked: %q", got)
+	}
+}
+
 func TestAnalyzerUsesItsDialect(t *testing.T) {
 	const sql = `SELECT * FROM t WHERE name = "alice"`
 	a := Default().WithDialect(DialectMySQL)
@@ -88,6 +97,10 @@ func TestAnalyzerUsesItsDialect(t *testing.T) {
 	for _, r := range a.Analyze(sql) {
 		if strings.Contains(r.Query, "alice") || strings.Contains(r.Fingerprint, "alice") {
 			t.Errorf("%s leaked: %q / %q", r.RuleName, r.Query, r.Fingerprint)
+		}
+		// Guard feeds this to the N+1 tracker in place of Fingerprint.
+		if r.Fingerprint != a.Fingerprint(sql) {
+			t.Errorf("%s fingerprint %q != Fingerprint %q", r.RuleName, r.Fingerprint, a.Fingerprint(sql))
 		}
 	}
 	if len(a.Analyze(sql)) == 0 {
