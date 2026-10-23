@@ -1,6 +1,7 @@
 package analyzer
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -35,6 +36,9 @@ func FuzzRedact(f *testing.F) {
 		`SELECT $$a'b$$ -- c`,
 		`SELECT a -- $$ b`,
 		`SELECT "id", ` + "`n`" + ` FROM t WHERE s = 'O''B'`,
+		`SELECT "a\", E'x\'' , 'secret' FROM t`,
+		`SELECT "a\", E'x\' secret' FROM t WHERE "z" = 1`,
+		`SELECT "weird;col", "a""b" FROM t WHERE n = "sk_live_51Habc123"`,
 	}
 	for _, s := range seeds {
 		f.Add(s)
@@ -52,10 +56,56 @@ func FuzzRedact(f *testing.F) {
 		}
 
 		stripped := stripComments(sql)
-		redact, keep := redactSpans(stripped)
-		checkSpans(t, "redact", redact, len(stripped))
-		checkSpans(t, "keep", keep, len(stripped))
+		for _, d := range []Dialect{DialectUnknown, DialectPostgres, DialectMySQL} {
+			redact, keep := redactSpans(stripped, d)
+			checkSpans(t, d.String()+" redact", redact, len(stripped))
+			checkSpans(t, d.String()+" keep", keep, len(stripped))
+		}
+
+		checkDialectsNarrowOnly(t, stripped)
 	})
+}
+
+// checkDialectsNarrowOnly pins that MySQL redacts every byte the unknown
+// dialect does, and that Postgres differs from it only in "..." names, which
+// end at the first undoubled quote under either backslash reading. Digits are
+// skipped: outside a span Redact's walk decides them.
+func checkDialectsNarrowOnly(t *testing.T, s string) {
+	t.Helper()
+	n := len(s)
+	unknown, _ := redactSpans(s, DialectUnknown)
+	u := spanMask(unknown, n)
+	my, _ := redactSpans(s, DialectMySQL)
+	m := spanMask(my, n)
+	for i := range n {
+		if u[i] && !m[i] && !isDigit(s[i]) {
+			t.Fatalf("mysql keeps byte %d of %q, which the unknown dialect redacts", i, s)
+		}
+	}
+
+	pg, _ := redactSpans(s, DialectPostgres)
+	if !strings.Contains(s, `"`) && !slices.Equal(pg, unknown) {
+		t.Fatalf("postgres redacts %v of %q, unknown %v", pg, s, unknown)
+	}
+	for _, backslash := range []bool{false, true} {
+		_, keep := literalSpans(s, backslash, DialectPostgres)
+		for _, sp := range keep {
+			if s[sp.lo] == '"' && strings.Contains(strings.ReplaceAll(s[sp.lo+1:sp.hi-1], `""`, ""), `"`) {
+				t.Fatalf("postgres name %q in %q runs past its closing quote", s[sp.lo:sp.hi], s)
+			}
+		}
+	}
+}
+
+// spanMask marks the bytes spans cover.
+func spanMask(spans []span, n int) []bool {
+	m := make([]bool, n)
+	for _, s := range spans {
+		for i := s.lo; i < s.hi; i++ {
+			m[i] = true
+		}
+	}
+	return m
 }
 
 func checkSpans(t *testing.T, name string, spans []span, n int) {

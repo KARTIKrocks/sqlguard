@@ -20,15 +20,21 @@ import (
 // Where a dialect ambiguity makes the end of a literal uncertain it
 // over-redacts rather than risk a leak; see redactSpans.
 //
-// One dialect gap is deliberate: a double-quoted run is kept as an identifier,
-// which is right for ANSI/Postgres and for MySQL under ANSI_QUOTES but not for
-// MySQL's default sql_mode, where "…" is also a string literal. On MySQL use
-// '…' or bind parameters for values. Backticks are always identifiers.
+// The dialect is unknown here, so a double-quoted run, which MySQL's default
+// sql_mode reads as a string, is kept only when it is shaped like an
+// identifier ("users", "created_at") and redacted otherwise. A value that is
+// itself identifier-shaped ("alice") is still kept; an Analyzer that knows
+// its dialect closes that gap. Backticks are always identifiers.
 //
 // Use it whenever a query is about to leave the process.
-func Redact(sql string) string {
+func Redact(sql string) string { return redact(sql, DialectUnknown) }
+
+// redact is Redact for a known dialect. Under MySQL every double-quoted run is
+// a literal (ANSI_QUOTES only over-redacts), and under Postgres every one is
+// an identifier.
+func redact(sql string, d Dialect) string {
 	s := stripComments(sql)
-	redact, keep := redactSpans(s)
+	redact, keep := redactSpans(s, d)
 
 	var b strings.Builder
 	b.Grow(len(s))
@@ -80,6 +86,12 @@ var fpListRe = regexp.MustCompile(`\(\?(?:, ?\?)+\)`)
 // metrics adapter group on, and is safe as a low-cardinality metric label.
 func Fingerprint(sql string) string {
 	return foldRedacted(Redact(sql))
+}
+
+// Fingerprint is the package Fingerprint read in a's dialect, the identity
+// Analyze and PrepareQuery report.
+func (a *Analyzer) Fingerprint(sql string) string {
+	return foldRedacted(redact(sql, a.dialect))
 }
 
 // foldRedacted applies the fingerprint's normalization to already-redacted
@@ -152,33 +164,43 @@ type span struct{ lo, hi int }
 // under either reading is redacted. Ordinary SQL contains no backslash-quote
 // sequence, so the two readings agree and the union is exact; only genuinely
 // ambiguous input pays with over-redaction.
-func redactSpans(s string) (redact, keep []span) {
-	loose, keepLoose := literalSpans(s, false)
+func redactSpans(s string, d Dialect) (redact, keep []span) {
+	loose, keepLoose := literalSpans(s, false, d)
 	// The readings can only diverge at a backslash inside a quoted run, so
 	// without one the second pass is provably identical and is skipped —
 	// Redact runs per query execution on the N+1 tracker's path.
 	if strings.IndexByte(s, '\\') < 0 {
 		return loose, keepLoose
 	}
-	strict, _ := literalSpans(s, true)
+	strict, _ := literalSpans(s, true, d)
 	return unionSpans(loose, strict), keepLoose
 }
 
 // literalSpans classifies the quoted runs in comment-free s. redact holds
 // single-quoted string literals and Postgres dollar-quoted strings, quotes
-// included; keep holds quoted identifiers ("…" / `…`), which are structure
-// rather than data. backslashEscapes selects the dialect reading described on
-// redactSpans; it never applies inside backticks, which are identifiers in
-// every dialect that has them.
-func literalSpans(s string, backslashEscapes bool) (redact, keep []span) {
+// included; keep holds quoted identifiers, which are structure rather than
+// data. A double-quoted run goes to one or the other by doubleQuotedIsIdent.
+// backslashEscapes selects the dialect reading described on redactSpans; it
+// never applies inside backticks, which are identifiers in every dialect that
+// has them.
+func literalSpans(s string, backslashEscapes bool, d Dialect) (redact, keep []span) {
 	for i := 0; i < len(s); {
 		switch c := s[i]; c {
 		case '\'':
 			j := scanQuotedRun(s, i, backslashEscapes)
 			redact = append(redact, span{i, j})
 			i = j
-		case '"', '`':
-			j := scanQuotedRun(s, i, backslashEscapes && c == '"')
+		case '"':
+			// A Postgres "..." is a name, which has no backslash escapes.
+			j, closed := scanQuotedRunClosed(s, i, backslashEscapes && d != DialectPostgres)
+			if closed && doubleQuotedIsIdent(s[i+1:j-1], d) {
+				keep = append(keep, span{i, j})
+			} else {
+				redact = append(redact, span{i, j})
+			}
+			i = j
+		case '`':
+			j := scanQuotedRun(s, i, false)
 			keep = append(keep, span{i, j})
 			i = j
 		case '$':
@@ -195,11 +217,43 @@ func literalSpans(s string, backslashEscapes bool) (redact, keep []span) {
 	return redact, keep
 }
 
+// doubleQuotedIsIdent reports whether a terminated double-quoted run with
+// this body is an identifier rather than a string: always under Postgres,
+// never under MySQL, and with the dialect unknown only when the body is a
+// plain ASCII identifier. An unterminated run is redacted in every dialect.
+func doubleQuotedIsIdent(body string, d Dialect) bool {
+	switch d {
+	case DialectPostgres:
+		return true
+	case DialectMySQL:
+		return false
+	}
+	if body == "" {
+		return false
+	}
+	if c := body[0]; c != '_' && (c|0x20 < 'a' || c|0x20 > 'z') {
+		return false
+	}
+	for i := range len(body) {
+		if c := body[i]; c >= 0x80 || (!isIdentByte(c) && c != '$') {
+			return false
+		}
+	}
+	return true
+}
+
 // scanQuotedRun returns the index just past the quoted run opening at s[i]. A
 // doubled quote is always an escape; a backslash escapes the following byte
 // only when backslashEscapes is set. An unterminated run extends to the end of
 // the input, so a stray quote can never leave its tail unredacted.
 func scanQuotedRun(s string, i int, backslashEscapes bool) int {
+	j, _ := scanQuotedRunClosed(s, i, backslashEscapes)
+	return j
+}
+
+// scanQuotedRunClosed is scanQuotedRun that also reports whether the run was
+// closed by its quote rather than by the end of the input.
+func scanQuotedRunClosed(s string, i int, backslashEscapes bool) (int, bool) {
 	q := s[i]
 	i++
 	for i < len(s) {
@@ -211,12 +265,12 @@ func scanQuotedRun(s string, i int, backslashEscapes bool) int {
 				i += 2
 				continue
 			}
-			return i + 1
+			return i + 1, true
 		default:
 			i++
 		}
 	}
-	return len(s)
+	return len(s), false
 }
 
 // scanDollarQuoted returns the index just past the Postgres dollar-quoted

@@ -1,7 +1,9 @@
 package middleware
 
 import (
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-sql-driver/mysql"
 	"github.com/jackc/pgx/v5/stdlib"
@@ -62,5 +64,30 @@ func TestDriverDialect(t *testing.T) {
 	g = WrapDriver(&stdlib.Driver{}, WithDetectedDialect(analyzer.DialectMySQL)).(*wDriver).g
 	if d := g.Analyzer().Dialect(); d != analyzer.DialectMySQL {
 		t.Errorf("caller's detected dialect lost to the driver's: %v", d)
+	}
+}
+
+// TestN1GroupsByTheGuardsDialect pins that the N+1 key and its reported query
+// come from the guard's analyzer, so a MySQL "…" value never reaches them.
+func TestN1GroupsByTheGuardsDialect(t *testing.T) {
+	rep := &countingReporter{}
+	g := NewGuard(WithDialect(analyzer.DialectMySQL), WithReporter(rep),
+		WithN1Detection(2, time.Minute), WithFindingDedup(0))
+	for _, name := range []string{"alice", "bob"} {
+		g.Check(`SELECT id FROM t WHERE name = "` + name + `"`)
+	}
+	var n1 int
+	for _, r := range rep.results {
+		for _, v := range []string{r.Query, r.Fingerprint} {
+			if strings.Contains(v, "alice") || strings.Contains(v, "bob") {
+				t.Errorf("%s leaked a value: %q", r.RuleName, v)
+			}
+		}
+		if r.RuleName == "n-plus-one" {
+			n1++
+		}
+	}
+	if n1 != 1 {
+		t.Errorf("n-plus-one findings = %d, want 1 (both values share a fingerprint)", n1)
 	}
 }

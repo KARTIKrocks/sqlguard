@@ -75,22 +75,39 @@ a threshold of 20 may land as 12 and 8 and trip neither) and lets the
 parameters avoid it entirely, and are the better answer for those values
 anyway.
 
-### One dialect gap to know about
+### Double quotes depend on the dialect
 
-A `"double-quoted"` run is treated as an **identifier** and preserved. That is
-correct for ANSI SQL, for PostgreSQL, and for MySQL under `ANSI_QUOTES` — but
-MySQL's default `sql_mode` also accepts `"…"` as a _string literal_, and
-sqlguard does not redact it. Preserving quoted identifiers is what keeps
-ORM-generated SQL readable in a finding, so the trade is deliberate. On MySQL,
-use `'…'` or bind parameters for values you want redacted.
+A `"double-quoted"` run is an identifier in PostgreSQL, ANSI SQL and MySQL
+under `ANSI_QUOTES`, but MySQL's default `sql_mode` also reads it as a _string
+literal_. So what sqlguard does with one depends on the
+[dialect](#the-dialect-hint):
+
+| Dialect | `"users"` | `"alice@example.com"` |
+| --- | --- | --- |
+| PostgreSQL | kept | kept (it can only be a name) |
+| MySQL | `?` | `?` |
+| unknown | kept | `?` |
+
+_Changed in 0.6._ Before, every double-quoted run was kept, so on MySQL a
+value written as `"…"` reached the log. With the dialect unknown, a run is now
+kept only when it looks like an identifier: ASCII letters, digits, `_` and `$`,
+not starting with a digit. Anything else is redacted, which costs readability
+on an unusual quoted name such as `"Order Details"`. A value that itself looks
+like a name is still kept with the dialect unknown: `"alice"`, but also a
+token such as `"sk_live_51Habc"`. On MySQL, set the dialect, or use `'…'` or
+bind parameters for values. An unterminated `"` is redacted to the end of the
+query in every dialect.
+Backticks are always identifiers.
+
+Under MySQL with `ANSI_QUOTES`, `"…"` is an identifier, so a MySQL analyzer
+over-redacts names there. That is the safe direction.
 
 ### The dialect hint
 
-_Added in 0.6._ Both gaps above exist because the lexer does not know the
-dialect. An analyzer now carries one (`analyzer.Dialect`: unknown, `postgres`
-or `mysql`), resolved once when it is built. In 0.6 it is recorded but does
-not yet change what `Redact` produces; the double-quote and backslash cases
-above are what it is for.
+_Added in 0.6._ The gaps above exist because the lexer does not know the
+dialect unless told. An analyzer carries one (`analyzer.Dialect`: unknown,
+`postgres` or `mysql`), resolved once when it is built. It decides the double
+quotes above; the backslash case is not dialect-aware yet.
 
 You rarely set it yourself. In order, the first of these that names a
 dialect wins:
@@ -107,10 +124,11 @@ dialect wins:
 A driver behind another wrapper, or SQLite, stays unknown, which keeps the
 dialect-agnostic behaviour described above.
 
-`Result.Query` is set from `Redact` centrally in `Analyzer.Analyze`, and the
-findings built outside the rule path — `slow-query` and `n-plus-one` — go
-through `Analyzer.PrepareQuery`, which applies the same policy. There is one
-normalizer in the codebase; nothing re-implements it.
+`Result.Query` is set from `Redact` centrally in `Analyzer.Analyze`, and a
+`slow-query` finding goes through `Analyzer.PrepareQuery`, which applies the
+same policy. An `n-plus-one` finding describes a pattern rather than one
+execution, so its `Query` is the fingerprint. There is one normalizer in the
+codebase; nothing re-implements it.
 
 ## Fingerprints
 
@@ -133,7 +151,10 @@ A fingerprint is:
 That makes it safe as a metrics label, a log key, or a grouping key in your
 observability stack. It is the value the [N+1 tracker](n-plus-one) groups
 on and the [de-duplicator](noise-control) keys on. The JSON reporter emits
-it as `fingerprint`; `analyzer.Fingerprint(sql)` computes it directly.
+it as `fingerprint`. To compute one yourself, call `Fingerprint(sql)` on the
+configured analyzer (`Guard.Analyzer()`), which reads `"…"` in its
+[dialect](#the-dialect-hint); the package-level `analyzer.Fingerprint(sql)`
+always uses the unknown dialect, so on MySQL the two can differ.
 
 `Fingerprint` is **always** populated, whether or not redaction is on.
 

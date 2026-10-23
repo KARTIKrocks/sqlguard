@@ -114,7 +114,7 @@ func (a *Analyzer) PrepareQuery(raw string) (display, fingerprint string) {
 	// One redaction pass feeds both returns: the fingerprint is the redacted
 	// text folded further, so computing it via Fingerprint(raw) would redact
 	// the same query a second time on a per-query path.
-	redacted := Redact(raw)
+	redacted := redact(raw, a.dialect)
 	fingerprint = foldRedacted(redacted)
 	if a.rawQuery {
 		return raw, fingerprint
@@ -227,7 +227,9 @@ func (a *Analyzer) Analyze(query string) []Result {
 
 	ignoreAll, ignored := parseIgnoreDirective(query)
 
-	display, fingerprint := a.PrepareQuery(query)
+	// Redacted lazily: most queries have no findings.
+	var display, fingerprint string
+	prepared := false
 
 	results := make([]Result, 0, len(a.rules))
 	for _, br := range a.rules {
@@ -251,6 +253,10 @@ func (a *Analyzer) Analyze(query string) []Result {
 			if s, has := a.severity[r.RuleName]; has {
 				r.Severity = s
 			}
+		}
+		if !prepared {
+			display, fingerprint = a.PrepareQuery(query)
+			prepared = true
 		}
 		r.Query = display
 		r.Fingerprint = fingerprint

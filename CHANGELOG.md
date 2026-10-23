@@ -18,7 +18,6 @@ the same version in lockstep.
   `mysqlparser`, the `pgx`, `lib/pq` and `go-sql-driver/mysql` drivers,
   `pgxguard`, `sqlxguard`, `entguard` and `gormguard` supply it.
   Integrations pass what they know through `middleware.WithDetectedDialect`.
-  Nothing uses it yet: redaction output is unchanged.
 - A weekly `Fuzz` workflow runs `FuzzRedact` and a new `FuzzIsMultiStatement`
   for real ([#83]); under `go test` a fuzz target only replays its seeds. A
   crasher is uploaded as an artifact to commit under
@@ -26,9 +25,24 @@ the same version in lockstep.
 
 ### Changed
 
+- **Breaking (Go API): `middleware.NewQueryTracker` takes the fingerprint
+  function first**, `NewQueryTracker(fingerprint, threshold, window,
+  severity, reportFn)`. Pass the analyzer's `Fingerprint` so N+1 groups by
+  its dialect.
 - `golangci-lint` pinned to v2.14.0 (was v2.13.2).
 
 ### Fixed
+
+- **MySQL `"double-quoted"` values are redacted** ([#62]). MySQL's default
+  `sql_mode` reads `"…"` as a string, and redaction kept every double-quoted
+  run as an identifier, so `WHERE email = "alice@example.com"` reached the
+  log and the fingerprint. With a MySQL dialect every `"…"` is now redacted;
+  with a Postgres one every `"…"` is kept. With the dialect unknown, a run is
+  kept only if it looks like an identifier, so the email is redacted but a
+  value shaped like one, such as `"alice"` or `"sk_live_51Habc"`, is not. An
+  unterminated `"` is redacted in every dialect. The N+1 grouping key and
+  `sqlguard explain`'s fingerprints now use the dialect too, so they match
+  `Result.Fingerprint`.
 
 - **A `WHERE` or `LIMIT` inside a subquery counts only where it bounds the
   statement** ([#91]). The default parser counted one anywhere and the

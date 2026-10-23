@@ -1,6 +1,7 @@
 package explain
 
 import (
+	"database/sql"
 	"strings"
 	"testing"
 
@@ -81,5 +82,23 @@ func TestValidate(t *testing.T) {
 				t.Errorf("error %q does not contain %q", err, c.wantErr)
 			}
 		})
+	}
+}
+
+// TestFingerprintFollowsTheDialect pins that a MySQL "..." value never reaches
+// an issue's fingerprint, and a Postgres "..." name is kept.
+func TestFingerprintFollowsTheDialect(t *testing.T) {
+	const q = `SELECT * FROM t WHERE name = "alice"`
+	for dialect, want := range map[string]string{
+		"mysql":    `SELECT * FROM t WHERE name = ?`,
+		"postgres": q,
+	} {
+		p, err := New(new(sql.DB), dialect)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := p.fingerprinter.Fingerprint(q); got != want {
+			t.Errorf("%s: fingerprint = %q, want %q", dialect, got, want)
+		}
 	}
 }

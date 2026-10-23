@@ -8,14 +8,6 @@ import (
 	"github.com/KARTIKrocks/sqlguard/analyzer"
 )
 
-// normalizeQuery is the N+1 grouping key: the canonical, literal-free query
-// fingerprint. It delegates to analyzer.Fingerprint so there is a single
-// normalizer in the codebase (the comment/string-literal-aware one) rather
-// than a second, subtly different regex pass.
-func normalizeQuery(query string) string {
-	return analyzer.Fingerprint(query)
-}
-
 type queryRecord struct {
 	count     int
 	firstSeen time.Time
@@ -33,27 +25,36 @@ type QueryTracker struct {
 	maxKeys   int
 	severity  analyzer.Severity
 	reporter  func(results []analyzer.Result)
+	// fingerprint is the grouping key and the reported query.
+	fingerprint func(string) string
 }
 
 // NewQueryTracker creates a tracker that flags when the same query pattern
-// appears more than threshold times within the given window. severity is the
-// one to report, which Guard resolves from the profile so a `severity:`
-// override on `n-plus-one` reaches the finding.
-func NewQueryTracker(threshold int, window time.Duration, severity analyzer.Severity, reportFn func([]analyzer.Result)) *QueryTracker {
+// appears more than threshold times within the given window. fingerprint
+// groups and reports each query; pass the Analyzer's Fingerprint so the
+// dialect is honoured.
+// severity is the one to report, which Guard resolves from the profile so a
+// `severity:` override on `n-plus-one` reaches the finding.
+func NewQueryTracker(fingerprint func(string) string, threshold int, window time.Duration, severity analyzer.Severity, reportFn func([]analyzer.Result)) *QueryTracker {
 	return &QueryTracker{
-		queries:   make(map[string]*queryRecord),
-		threshold: threshold,
-		window:    window,
-		maxKeys:   10000,
-		severity:  severity,
-		reporter:  reportFn,
+		queries:     make(map[string]*queryRecord),
+		threshold:   threshold,
+		window:      window,
+		maxKeys:     10000,
+		severity:    severity,
+		reporter:    reportFn,
+		fingerprint: fingerprint,
 	}
 }
 
 // Track records a query execution and reports if N+1 pattern is detected.
 func (qt *QueryTracker) Track(query string) {
-	normalized := normalizeQuery(query)
+	qt.trackFingerprint(qt.fingerprint(query))
+}
 
+// trackFingerprint is Track for a caller that already holds the query's
+// fingerprint, so it is not redacted twice.
+func (qt *QueryTracker) trackFingerprint(normalized string) {
 	qt.mu.Lock()
 
 	now := time.Now()
