@@ -38,6 +38,7 @@ package pgxguard
 import (
 	"context"
 
+	"github.com/KARTIKrocks/sqlguard/analyzer"
 	"github.com/KARTIKrocks/sqlguard/middleware"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/multitracer"
@@ -65,7 +66,10 @@ var (
 // options (WithAnalyzer, WithReporter, WithSlowQueryThreshold, WithParser,
 // WithN1Detection, …) — the same option set the database/sql driver wrapper
 // uses, so there is no parallel configuration surface to drift.
+//
+// The dialect is Postgres unless an option says otherwise.
 func NewTracer(opts ...middleware.Option) *Tracer {
+	opts = append([]middleware.Option{middleware.WithDetectedDialect(analyzer.DialectPostgres)}, opts...)
 	return &Tracer{g: middleware.NewGuard(opts...)}
 }
 

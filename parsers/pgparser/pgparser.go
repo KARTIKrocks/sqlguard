@@ -33,6 +33,9 @@ func New() *Parser {
 
 var _ analyzer.Parser = (*Parser)(nil)
 
+// Dialect reports analyzer.DialectPostgres, so WithParser sets the dialect too.
+func (p *Parser) Dialect() analyzer.Dialect { return analyzer.DialectPostgres }
+
 // Parse implements analyzer.Parser. It never returns an error: unparseable
 // SQL yields the fallback parser's best-effort Statement (Exact=false).
 func (p *Parser) Parse(sql string) (*analyzer.Statement, error) {

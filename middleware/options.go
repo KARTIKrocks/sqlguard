@@ -21,6 +21,11 @@ type options struct {
 	enableN1         bool
 	dedupWindow      time.Duration
 	cacheSize        int
+	// dialect is set by WithDialect (dialectSet records that it was);
+	// detectedDialect by WithDetectedDialect or driver detection.
+	dialect         analyzer.Dialect
+	dialectSet      bool
+	detectedDialect analyzer.Dialect
 }
 
 // Option configures the runtime guard.

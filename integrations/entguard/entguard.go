@@ -30,6 +30,7 @@ import (
 	"database/sql"
 
 	"entgo.io/ent/dialect"
+	"github.com/KARTIKrocks/sqlguard/analyzer"
 	"github.com/KARTIKrocks/sqlguard/middleware"
 )
 
@@ -48,6 +49,9 @@ var _ dialect.Driver = (*Driver)(nil)
 // WithParser, WithN1Detection, …) — the same option set every other sqlguard
 // surface uses, so there is no parallel configuration surface to drift.
 func Wrap(d dialect.Driver, opts ...middleware.Option) *Driver {
+	// ent names its dialect ("postgres", "mysql", "sqlite3").
+	dl, _ := analyzer.ParseDialect(d.Dialect())
+	opts = append([]middleware.Option{middleware.WithDetectedDialect(dl)}, opts...)
 	return &Driver{Driver: d, g: middleware.NewGuard(opts...)}
 }
 

@@ -191,3 +191,18 @@ func TestDriver_TxQueriesAnalyzed(t *testing.T) {
 		t.Fatalf("expected select-star finding from in-tx query, got %+v", cap.snapshot())
 	}
 }
+
+func TestWrapDetectsDialect(t *testing.T) {
+	drv, err := entsql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("entsql.Open: %v", err)
+	}
+	defer drv.Close()
+	if d := Wrap(drv).g.Analyzer().Dialect(); d != analyzer.DialectUnknown {
+		t.Errorf("sqlite3 dialect = %v, want unknown", d)
+	}
+	my := entsql.OpenDB("mysql", drv.DB())
+	if d := Wrap(my).g.Analyzer().Dialect(); d != analyzer.DialectMySQL {
+		t.Errorf("mysql dialect = %v, want mysql", d)
+	}
+}

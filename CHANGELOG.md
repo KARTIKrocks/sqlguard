@@ -11,6 +11,14 @@ the same version in lockstep.
 
 ### Added
 
+- **A dialect hint for redaction** (`analyzer.Dialect`). An analyzer can now
+  know whether its queries are PostgreSQL or MySQL, which the fixes for
+  [#62], [#64] and [#65] build on. Set it with `middleware.WithDialect`, the
+  `dialect:` config key or `Analyzer.WithDialect`; otherwise `pgparser`,
+  `mysqlparser`, the `pgx`, `lib/pq` and `go-sql-driver/mysql` drivers,
+  `pgxguard`, `sqlxguard`, `entguard` and `gormguard` supply it.
+  Integrations pass what they know through `middleware.WithDetectedDialect`.
+  Nothing uses it yet: redaction output is unchanged.
 - A weekly `Fuzz` workflow runs `FuzzRedact` and a new `FuzzIsMultiStatement`
   for real ([#83]); under `go test` a fuzz target only replays its seeds. A
   crasher is uploaded as an artifact to commit under
@@ -94,6 +102,9 @@ the same version in lockstep.
   `colord` and `serialize-javascript`. Build-time only — nothing here ships to
   consumers of the Go modules or to readers of the published site.
 
+[#62]: https://github.com/KARTIKrocks/sqlguard/issues/62
+[#64]: https://github.com/KARTIKrocks/sqlguard/issues/64
+[#65]: https://github.com/KARTIKrocks/sqlguard/issues/65
 [#66]: https://github.com/KARTIKrocks/sqlguard/issues/66
 [#81]: https://github.com/KARTIKrocks/sqlguard/issues/81
 [#83]: https://github.com/KARTIKrocks/sqlguard/issues/83

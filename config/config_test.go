@@ -563,3 +563,23 @@ func TestProfile_OnlyResolvingToNothingWarns(t *testing.T) {
 		t.Errorf("the consequence was not reported: %v", c.Warnings())
 	}
 }
+
+func TestDialectKey(t *testing.T) {
+	c, err := Load(writeConfig(t, t.TempDir(), "dialect: MySQL\n"))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	p, err := c.Profile()
+	if err != nil || p.Dialect != analyzer.DialectMySQL {
+		t.Fatalf("Profile dialect = %v, %v; want mysql", p.Dialect, err)
+	}
+
+	bad := &Config{Dialect: "oracle"}
+	p, err = bad.Profile()
+	if err != nil || p.Dialect != analyzer.DialectUnknown || len(bad.Warnings()) == 0 {
+		t.Errorf("lenient unknown dialect: %v, %v, warnings %v", p.Dialect, err, bad.Warnings())
+	}
+	if _, err := (&Config{Strict: true, Dialect: "oracle"}).Profile(); err == nil {
+		t.Error("strict: expected an error for an unknown dialect")
+	}
+}

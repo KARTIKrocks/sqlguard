@@ -217,6 +217,8 @@ type Profile struct {
 	// left in the reported SQL). Default (false) redacts — see
 	// Analyzer.WithRawQuery.
 	RawQuery bool
+	// Dialect is the SQL dialect of the analyzed queries; see Dialect.
+	Dialect Dialect
 }
 
 // Skip reports whether this profile excludes the named rule from evaluation,
