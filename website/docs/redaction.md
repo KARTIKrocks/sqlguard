@@ -95,8 +95,8 @@ not starting with a digit. Anything else is redacted, which costs readability
 on an unusual quoted name such as `"Order Details"`. A value that itself looks
 like a name is still kept with the dialect unknown: `"alice"`, but also a
 token such as `"sk_live_51Habc"`. On MySQL, set the dialect, or use `'…'` or
-bind parameters for values. An
-unterminated `"` is redacted to the end of the query in every dialect.
+bind parameters for values. An unterminated `"` is redacted to the end of the
+query in every dialect.
 Backticks are always identifiers.
 
 Under MySQL with `ANSI_QUOTES`, `"…"` is an identifier, so a MySQL analyzer
@@ -124,10 +124,11 @@ dialect wins:
 A driver behind another wrapper, or SQLite, stays unknown, which keeps the
 dialect-agnostic behaviour described above.
 
-`Result.Query` is set from `Redact` centrally in `Analyzer.Analyze`, and the
-findings built outside the rule path — `slow-query` and `n-plus-one` — go
-through `Analyzer.PrepareQuery`, which applies the same policy. There is one
-normalizer in the codebase; nothing re-implements it.
+`Result.Query` is set from `Redact` centrally in `Analyzer.Analyze`, and a
+`slow-query` finding goes through `Analyzer.PrepareQuery`, which applies the
+same policy. An `n-plus-one` finding describes a pattern rather than one
+execution, so its `Query` is the fingerprint. There is one normalizer in the
+codebase; nothing re-implements it.
 
 ## Fingerprints
 
@@ -150,7 +151,10 @@ A fingerprint is:
 That makes it safe as a metrics label, a log key, or a grouping key in your
 observability stack. It is the value the [N+1 tracker](n-plus-one) groups
 on and the [de-duplicator](noise-control) keys on. The JSON reporter emits
-it as `fingerprint`; `analyzer.Fingerprint(sql)` computes it directly.
+it as `fingerprint`. To compute one yourself, call `Fingerprint(sql)` on the
+configured analyzer (`Guard.Analyzer()`), which reads `"…"` in its
+[dialect](#the-dialect-hint); the package-level `analyzer.Fingerprint(sql)`
+always uses the unknown dialect, so on MySQL the two can differ.
 
 `Fingerprint` is **always** populated, whether or not redaction is on.
 
