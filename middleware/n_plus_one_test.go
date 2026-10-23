@@ -8,31 +8,9 @@ import (
 	"github.com/KARTIKrocks/sqlguard/analyzer"
 )
 
-func TestNormalizeQuery(t *testing.T) {
-	tests := []struct {
-		name  string
-		input string
-		want  string
-	}{
-		{"numbers", "SELECT * FROM users WHERE id = 42", "SELECT * FROM users WHERE id = ?"},
-		{"strings", "SELECT * FROM users WHERE name = 'alice'", "SELECT * FROM users WHERE name = ?"},
-		{"mixed", "SELECT * FROM users WHERE id = 1 AND name = 'bob'", "SELECT * FROM users WHERE id = ? AND name = ?"},
-		{"no literals", "SELECT * FROM users WHERE id = ?", "SELECT * FROM users WHERE id = ?"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := normalizeQuery(tt.input)
-			if got != tt.want {
-				t.Errorf("normalizeQuery(%q) = %q, want %q", tt.input, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestQueryTracker_DetectsN1(t *testing.T) {
 	var reported []analyzer.Result
-	tracker := NewQueryTracker(3, 5*time.Second, analyzer.SeverityWarning, func(results []analyzer.Result) {
+	tracker := NewQueryTracker(nil, 3, 5*time.Second, analyzer.SeverityWarning, func(results []analyzer.Result) {
 		reported = append(reported, results...)
 	})
 
@@ -51,7 +29,7 @@ func TestQueryTracker_DetectsN1(t *testing.T) {
 
 func TestQueryTracker_DifferentPatterns(t *testing.T) {
 	var reported []analyzer.Result
-	tracker := NewQueryTracker(3, 5*time.Second, analyzer.SeverityWarning, func(results []analyzer.Result) {
+	tracker := NewQueryTracker(nil, 3, 5*time.Second, analyzer.SeverityWarning, func(results []analyzer.Result) {
 		reported = append(reported, results...)
 	})
 
@@ -67,7 +45,7 @@ func TestQueryTracker_DifferentPatterns(t *testing.T) {
 
 func TestQueryTracker_BelowThreshold(t *testing.T) {
 	var reported []analyzer.Result
-	tracker := NewQueryTracker(5, 5*time.Second, analyzer.SeverityWarning, func(results []analyzer.Result) {
+	tracker := NewQueryTracker(nil, 5, 5*time.Second, analyzer.SeverityWarning, func(results []analyzer.Result) {
 		reported = append(reported, results...)
 	})
 
@@ -83,7 +61,7 @@ func TestQueryTracker_BelowThreshold(t *testing.T) {
 
 func TestQueryTracker_ReportsOnlyOnce(t *testing.T) {
 	var reported []analyzer.Result
-	tracker := NewQueryTracker(2, 5*time.Second, analyzer.SeverityWarning, func(results []analyzer.Result) {
+	tracker := NewQueryTracker(nil, 2, 5*time.Second, analyzer.SeverityWarning, func(results []analyzer.Result) {
 		reported = append(reported, results...)
 	})
 
@@ -99,7 +77,7 @@ func TestQueryTracker_ReportsOnlyOnce(t *testing.T) {
 
 func TestQueryTracker_Reset(t *testing.T) {
 	var reported []analyzer.Result
-	tracker := NewQueryTracker(2, 5*time.Second, analyzer.SeverityWarning, func(results []analyzer.Result) {
+	tracker := NewQueryTracker(nil, 2, 5*time.Second, analyzer.SeverityWarning, func(results []analyzer.Result) {
 		reported = append(reported, results...)
 	})
 
@@ -119,13 +97,9 @@ func TestQueryTracker_Reset(t *testing.T) {
 // the *sql.DB returned by the driver wrapper.
 
 func TestQueryTracker_BoundedAtMaxKeys(t *testing.T) {
-	qt := &QueryTracker{
-		queries:   make(map[string]*queryRecord),
-		threshold: 1000,      // high so nothing reports
-		window:    time.Hour, // long so nothing expires (eviction frees nothing)
-		maxKeys:   3,
-		reporter:  func([]analyzer.Result) {},
-	}
+	// High threshold so nothing reports, long window so nothing expires.
+	qt := NewQueryTracker(nil, 1000, time.Hour, analyzer.SeverityWarning, func([]analyzer.Result) {})
+	qt.maxKeys = 3
 
 	// Distinct query *shapes* (distinct column names → distinct fingerprints),
 	// far more than maxKeys, all in-window. The map must stay capped.
@@ -140,13 +114,8 @@ func TestQueryTracker_BoundedAtMaxKeys(t *testing.T) {
 
 func TestQueryTracker_TrackedKeyHonoredAtCap(t *testing.T) {
 	var reports int
-	qt := &QueryTracker{
-		queries:   make(map[string]*queryRecord),
-		threshold: 3,
-		window:    time.Hour,
-		maxKeys:   2,
-		reporter:  func([]analyzer.Result) { reports++ },
-	}
+	qt := NewQueryTracker(nil, 3, time.Hour, analyzer.SeverityWarning, func([]analyzer.Result) { reports++ })
+	qt.maxKeys = 2
 
 	// "cola" gets tracked to count 2 (below threshold), then the cap fills.
 	qt.Track("SELECT cola FROM t")

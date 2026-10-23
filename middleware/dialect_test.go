@@ -78,8 +78,10 @@ func TestN1GroupsByTheGuardsDialect(t *testing.T) {
 	}
 	var n1 int
 	for _, r := range rep.results {
-		if strings.Contains(r.Query, "alice") || strings.Contains(r.Fingerprint, "bob") {
-			t.Errorf("%s leaked a value: %q", r.RuleName, r.Query)
+		for _, v := range []string{r.Query, r.Fingerprint} {
+			if strings.Contains(v, "alice") || strings.Contains(v, "bob") {
+				t.Errorf("%s leaked a value: %q", r.RuleName, v)
+			}
 		}
 		if r.RuleName == "n-plus-one" {
 			n1++

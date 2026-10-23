@@ -35,6 +35,8 @@ func FuzzRedact(f *testing.F) {
 		`SELECT $$a'b$$ -- c`,
 		`SELECT a -- $$ b`,
 		`SELECT "id", ` + "`n`" + ` FROM t WHERE s = 'O''B'`,
+		`SELECT "a\", E'x\'' , 'secret' FROM t`,
+		`SELECT "weird;col", "a""b" FROM t WHERE n = "sk_live_51Habc123"`,
 	}
 	for _, s := range seeds {
 		f.Add(s)
@@ -52,10 +54,55 @@ func FuzzRedact(f *testing.F) {
 		}
 
 		stripped := stripComments(sql)
-		redact, keep := redactSpans(stripped, DialectUnknown)
-		checkSpans(t, "redact", redact, len(stripped))
-		checkSpans(t, "keep", keep, len(stripped))
+		for _, d := range []Dialect{DialectUnknown, DialectPostgres, DialectMySQL} {
+			redact, keep := redactSpans(stripped, d)
+			checkSpans(t, d.String()+" redact", redact, len(stripped))
+			checkSpans(t, d.String()+" keep", keep, len(stripped))
+		}
+
+		checkDialectsNarrowOnly(t, stripped)
 	})
+}
+
+// checkDialectsNarrowOnly pins, per backslash reading, that MySQL redacts every
+// byte the unknown dialect does and Postgres keeps one only inside a "..." name.
+func checkDialectsNarrowOnly(t *testing.T, s string) {
+	t.Helper()
+	n := len(s)
+	for _, backslash := range []bool{false, true} {
+		unknown, _ := literalSpans(s, backslash, DialectUnknown)
+		my, myKeep := literalSpans(s, backslash, DialectMySQL)
+		pg, pgKeep := literalSpans(s, backslash, DialectPostgres)
+		for name, spans := range map[string][]span{"mysql redact": my, "mysql keep": myKeep, "postgres redact": pg, "postgres keep": pgKeep} {
+			checkSpans(t, name, spans, n)
+		}
+		var names []span
+		for _, sp := range pgKeep {
+			if s[sp.lo] == '"' {
+				names = append(names, sp)
+			}
+		}
+		u, m, p, pn := spanMask(unknown, n), spanMask(my, n), spanMask(pg, n), spanMask(names, n)
+		for i := range n {
+			if u[i] && !m[i] {
+				t.Fatalf("MySQL keeps byte %d of %q, which the unknown dialect redacts", i, s)
+			}
+			if u[i] && !p[i] && !pn[i] {
+				t.Fatalf("Postgres keeps byte %d of %q outside a quoted name", i, s)
+			}
+		}
+	}
+}
+
+// spanMask marks the bytes spans cover.
+func spanMask(spans []span, n int) []bool {
+	m := make([]bool, n)
+	for _, s := range spans {
+		for i := s.lo; i < s.hi; i++ {
+			m[i] = true
+		}
+	}
+	return m
 }
 
 func checkSpans(t *testing.T, name string, spans []span, n int) {

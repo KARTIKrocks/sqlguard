@@ -100,7 +100,8 @@ reviews:
         under Postgres every one is kept (never a literal there), and with the
         dialect unknown only identifier-shaped ones are kept. The N+1 key must
         be the guard's Analyzer.Fingerprint, not the dialect-blind package
-        Fingerprint.
+        Fingerprint, and explain fingerprints in its connected dialect.
+        FuzzRedact pins the narrowing direction per reading.
         Server settings (ANSI_QUOTES, standard_conforming_strings=off) still
         vary quoting under a known dialect, so such a reading must be safe
         under them too or be opt-in.

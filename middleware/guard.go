@@ -84,10 +84,9 @@ func NewGuard(opts ...Option) *Guard {
 	}
 	n1 := resolvePolicy(o.analyzer, "n-plus-one")
 	if o.enableN1 && n1.enabled {
-		g.tracker = NewQueryTracker(o.n1Threshold, o.n1Window, n1.severity, func(results []analyzer.Result) {
+		g.tracker = NewQueryTracker(o.analyzer.Fingerprint, o.n1Threshold, o.n1Window, n1.severity, func(results []analyzer.Result) {
 			o.reporter.Report(results)
 		})
-		g.tracker.fingerprint = o.analyzer.Fingerprint
 	}
 	return g
 }
@@ -103,7 +102,12 @@ func (g *Guard) Check(query string) {
 		g.report(results)
 	}
 	if g.tracker != nil {
-		g.tracker.Track(query)
+		// A finding already carries the fingerprint; reuse it.
+		if len(results) > 0 {
+			g.tracker.trackFingerprint(results[0].Fingerprint)
+		} else {
+			g.tracker.Track(query)
+		}
 	}
 }
 

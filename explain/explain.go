@@ -25,6 +25,8 @@ type PlanAnalyzer struct {
 	// `severity` reach them exactly as they reach a statement rule. Nil means
 	// no configuration: every plan rule fires at its built-in severity.
 	rules *analyzer.Analyzer
+	// fingerprinter reads literals in the connected database's dialect.
+	fingerprinter *analyzer.Analyzer
 }
 
 // Option configures a PlanAnalyzer.
@@ -61,7 +63,8 @@ func New(db *sql.DB, dialect string, opts ...Option) (*PlanAnalyzer, error) {
 	if dialect != "postgres" && dialect != "mysql" {
 		return nil, fmt.Errorf("explain: unsupported dialect %q (use 'postgres' or 'mysql')", dialect)
 	}
-	p := &PlanAnalyzer{db: db, dialect: dialect}
+	d, _ := analyzer.ParseDialect(dialect)
+	p := &PlanAnalyzer{db: db, dialect: dialect, fingerprinter: analyzer.New().WithDialect(d)}
 	for _, o := range opts {
 		o(p)
 	}
@@ -96,7 +99,7 @@ func (p *PlanAnalyzer) Analyze(ctx context.Context, query string) (*Result, erro
 	}
 	if res != nil {
 		res.Issues = p.applyProfile(res.Issues)
-		fp := analyzer.Fingerprint(query)
+		fp := p.fingerprinter.Fingerprint(query)
 		for i := range res.Issues {
 			res.Issues[i].Fingerprint = fp
 		}

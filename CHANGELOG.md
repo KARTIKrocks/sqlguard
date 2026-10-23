@@ -25,6 +25,10 @@ the same version in lockstep.
 
 ### Changed
 
+- **Breaking (Go API): `middleware.NewQueryTracker` takes the fingerprint
+  function first**, `NewQueryTracker(fingerprint, threshold, window,
+  severity, reportFn)`. Pass the analyzer's `Fingerprint` so N+1 groups by
+  its dialect; `nil` uses the dialect-blind `analyzer.Fingerprint`.
 - `golangci-lint` pinned to v2.14.0 (was v2.13.2).
 
 ### Fixed
@@ -35,8 +39,9 @@ the same version in lockstep.
   log and the fingerprint. With a MySQL dialect every `"…"` is now redacted;
   with a Postgres one every `"…"` is kept. With the dialect unknown, a run is
   kept only if it looks like an identifier, so the email is redacted but a
-  bare `"alice"` is not. An unterminated `"` is redacted in every dialect.
-  The N+1 grouping key now uses the guard's dialect too, so it always matches
+  value shaped like one, such as `"alice"` or `"sk_live_51Habc"`, is not. An
+  unterminated `"` is redacted in every dialect. The N+1 grouping key and
+  `sqlguard explain`'s fingerprints now use the dialect too, so they match
   `Result.Fingerprint`.
 
 - **A `WHERE` or `LIMIT` inside a subquery counts only where it bounds the

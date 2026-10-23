@@ -92,9 +92,10 @@ _Changed in 0.6._ Before, every double-quoted run was kept, so on MySQL a
 value written as `"…"` reached the log. With the dialect unknown, a run is now
 kept only when it looks like an identifier: ASCII letters, digits, `_` and `$`,
 not starting with a digit. Anything else is redacted, which costs readability
-on an unusual quoted name such as `"Order Details"`. A short value that itself
-looks like a name, such as `"alice"`, is still kept with the dialect unknown;
-on MySQL, set the dialect, or use `'…'` or bind parameters for values. An
+on an unusual quoted name such as `"Order Details"`. A value that itself looks
+like a name is still kept with the dialect unknown: `"alice"`, but also a
+token such as `"sk_live_51Habc"`. On MySQL, set the dialect, or use `'…'` or
+bind parameters for values. An
 unterminated `"` is redacted to the end of the query in every dialect.
 Backticks are always identifiers.
 

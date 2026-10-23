@@ -227,7 +227,8 @@ func (a *Analyzer) Analyze(query string) []Result {
 
 	ignoreAll, ignored := parseIgnoreDirective(query)
 
-	display, fingerprint := a.PrepareQuery(query)
+	// Redacted lazily: most queries have no findings.
+	var display, fingerprint string
 
 	results := make([]Result, 0, len(a.rules))
 	for _, br := range a.rules {
@@ -251,6 +252,9 @@ func (a *Analyzer) Analyze(query string) []Result {
 			if s, has := a.severity[r.RuleName]; has {
 				r.Severity = s
 			}
+		}
+		if fingerprint == "" {
+			display, fingerprint = a.PrepareQuery(query)
 		}
 		r.Query = display
 		r.Fingerprint = fingerprint
