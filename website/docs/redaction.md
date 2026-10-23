@@ -75,22 +75,38 @@ a threshold of 20 may land as 12 and 8 and trip neither) and lets the
 parameters avoid it entirely, and are the better answer for those values
 anyway.
 
-### One dialect gap to know about
+### Double quotes depend on the dialect
 
-A `"double-quoted"` run is treated as an **identifier** and preserved. That is
-correct for ANSI SQL, for PostgreSQL, and for MySQL under `ANSI_QUOTES` — but
-MySQL's default `sql_mode` also accepts `"…"` as a _string literal_, and
-sqlguard does not redact it. Preserving quoted identifiers is what keeps
-ORM-generated SQL readable in a finding, so the trade is deliberate. On MySQL,
-use `'…'` or bind parameters for values you want redacted.
+A `"double-quoted"` run is an identifier in PostgreSQL, ANSI SQL and MySQL
+under `ANSI_QUOTES`, but MySQL's default `sql_mode` also reads it as a _string
+literal_. So what sqlguard does with one depends on the
+[dialect](#the-dialect-hint):
+
+| Dialect | `"users"` | `"alice@example.com"` |
+| --- | --- | --- |
+| PostgreSQL | kept | kept (it can only be a name) |
+| MySQL | `?` | `?` |
+| unknown | kept | `?` |
+
+_Changed in 0.6._ Before, every double-quoted run was kept, so on MySQL a
+value written as `"…"` reached the log. With the dialect unknown, a run is now
+kept only when it looks like an identifier: ASCII letters, digits, `_` and `$`,
+not starting with a digit. Anything else is redacted, which costs readability
+on an unusual quoted name such as `"Order Details"`. A short value that itself
+looks like a name, such as `"alice"`, is still kept with the dialect unknown;
+on MySQL, set the dialect, or use `'…'` or bind parameters for values. An
+unterminated `"` is redacted to the end of the query in every dialect.
+Backticks are always identifiers.
+
+Under MySQL with `ANSI_QUOTES`, `"…"` is an identifier, so a MySQL analyzer
+over-redacts names there. That is the safe direction.
 
 ### The dialect hint
 
-_Added in 0.6._ Both gaps above exist because the lexer does not know the
-dialect. An analyzer now carries one (`analyzer.Dialect`: unknown, `postgres`
-or `mysql`), resolved once when it is built. In 0.6 it is recorded but does
-not yet change what `Redact` produces; the double-quote and backslash cases
-above are what it is for.
+_Added in 0.6._ The gaps above exist because the lexer does not know the
+dialect unless told. An analyzer carries one (`analyzer.Dialect`: unknown,
+`postgres` or `mysql`), resolved once when it is built. It decides the double
+quotes above; the backslash case is not dialect-aware yet.
 
 You rarely set it yourself. In order, the first of these that names a
 dialect wins:

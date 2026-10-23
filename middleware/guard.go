@@ -87,6 +87,7 @@ func NewGuard(opts ...Option) *Guard {
 		g.tracker = NewQueryTracker(o.n1Threshold, o.n1Window, n1.severity, func(results []analyzer.Result) {
 			o.reporter.Report(results)
 		})
+		g.tracker.fingerprint = o.analyzer.Fingerprint
 	}
 	return g
 }

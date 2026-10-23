@@ -114,7 +114,7 @@ func (a *Analyzer) PrepareQuery(raw string) (display, fingerprint string) {
 	// One redaction pass feeds both returns: the fingerprint is the redacted
 	// text folded further, so computing it via Fingerprint(raw) would redact
 	// the same query a second time on a per-query path.
-	redacted := Redact(raw)
+	redacted := redact(raw, a.dialect)
 	fingerprint = foldRedacted(redacted)
 	if a.rawQuery {
 		return raw, fingerprint

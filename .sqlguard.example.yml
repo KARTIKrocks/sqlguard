@@ -68,9 +68,9 @@ rules:
 # local debugging where the query text is trusted.
 redact: true
 
-# SQL dialect of the analyzed queries: postgres or mysql (0.6+). A hint for how
-# the redaction lexer reads quotes and escapes; redaction output does not use
-# it yet. Usually unnecessary: the
+# SQL dialect of the analyzed queries: postgres or mysql (0.6+). It decides
+# whether redaction reads "..." as a string (mysql) or a name (postgres).
+# Usually unnecessary: the
 # pgx, lib/pq and go-sql-driver/mysql drivers, pgxguard, entguard, sqlxguard,
 # gormguard and the pgparser/mysqlparser parsers detect it. Set it
 # when they can't, e.g. behind another driver wrapper. WithDialect in Go wins

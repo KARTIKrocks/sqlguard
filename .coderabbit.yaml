@@ -93,10 +93,14 @@ reviews:
         analyzer.Dialect is a hint for that lexer, resolved once at construction,
         never per query. Precedence: middleware.WithDialect, then the
         Analyzer's own (config `dialect:`, then a single-dialect parser, which
-        fills it only while unknown), then WithDetectedDialect. DialectUnknown
-        must keep today's output byte for byte, and a known dialect may only
-        drop a hedge where it makes the answer certain: never leave a literal
-        byte the unknown scan would redact, never miss a ';' it would catch.
+        the dialect follows unless set explicitly), then WithDetectedDialect.
+        A known dialect may only drop a hedge where it makes the answer
+        certain: never leave a literal byte the unknown scan would redact,
+        never miss a ';' it would catch. Under MySQL every "..." is redacted,
+        under Postgres every one is kept (never a literal there), and with the
+        dialect unknown only identifier-shaped ones are kept. The N+1 key must
+        be the guard's Analyzer.Fingerprint, not the dialect-blind package
+        Fingerprint.
         Server settings (ANSI_QUOTES, standard_conforming_strings=off) still
         vary quoting under a known dialect, so such a reading must be safe
         under them too or be opt-in.

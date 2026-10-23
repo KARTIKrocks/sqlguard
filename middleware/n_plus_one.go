@@ -33,6 +33,9 @@ type QueryTracker struct {
 	maxKeys   int
 	severity  analyzer.Severity
 	reporter  func(results []analyzer.Result)
+	// fingerprint is the grouping key; Guard sets its analyzer's, which
+	// knows the dialect.
+	fingerprint func(string) string
 }
 
 // NewQueryTracker creates a tracker that flags when the same query pattern
@@ -52,7 +55,11 @@ func NewQueryTracker(threshold int, window time.Duration, severity analyzer.Seve
 
 // Track records a query execution and reports if N+1 pattern is detected.
 func (qt *QueryTracker) Track(query string) {
-	normalized := normalizeQuery(query)
+	fp := qt.fingerprint
+	if fp == nil {
+		fp = normalizeQuery
+	}
+	normalized := fp(query)
 
 	qt.mu.Lock()
 

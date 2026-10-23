@@ -52,7 +52,7 @@ func FuzzRedact(f *testing.F) {
 		}
 
 		stripped := stripComments(sql)
-		redact, keep := redactSpans(stripped)
+		redact, keep := redactSpans(stripped, DialectUnknown)
 		checkSpans(t, "redact", redact, len(stripped))
 		checkSpans(t, "keep", keep, len(stripped))
 	})

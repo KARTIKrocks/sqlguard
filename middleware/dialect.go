@@ -7,10 +7,9 @@ import (
 	"github.com/KARTIKrocks/sqlguard/analyzer"
 )
 
-// WithDialect records the SQL dialect of the analyzed queries, a hint for how
-// the redaction lexer should read quotes and escapes; redaction output does
-// not use it yet. It outranks a `dialect:` in the config file and anything
-// detected.
+// WithDialect sets the SQL dialect of the analyzed queries, which decides
+// whether redaction reads "…" as a string (MySQL) or a name (Postgres). It
+// outranks a `dialect:` in the config file and anything detected.
 func WithDialect(d analyzer.Dialect) Option {
 	return func(o *options) {
 		o.dialect = d
