@@ -56,16 +56,16 @@ rules:
   # Per-rule tunables. Keys are rule-specific; see the Rules reference.
   settings:
     leading-wildcard:
-      min-length: 3       # ignore LIKE '%x%' with a searchable term shorter than this
+      min-length: 3 # ignore LIKE '%x%' with a searchable term shorter than this
     in-list-too-large:
-      max-length: 100     # flag IN (...) with more elements than this
+      max-length: 100 # flag IN (...) with more elements than this
     large-offset:
-      threshold: 1000     # flag a literal OFFSET above this
+      threshold: 1000 # flag a literal OFFSET above this
     slow-query:
-      threshold: 200ms    # runtime: flag a query at or above this latency
+      threshold: 200ms # runtime: flag a query at or above this latency
     n-plus-one:
-      threshold: 10       # runtime: this many of the same fingerprint...
-      window: 1m          # ...within this window
+      threshold: 10 # runtime: this many of the same fingerprint...
+      window: 1m # ...within this window
 
 # Redact literal values out of Result.Query. ON by default. Set false ONLY
 # for local debugging where the query text is trusted.
@@ -87,18 +87,18 @@ scan:
     - "_gen\\.go$"
 ```
 
-| Key | Applies to | Notes |
-| --- | --- | --- |
-| `version` | all | Reserved for forward compatibility; always `1` today. |
-| `strict` | all | Make unknown keys, unknown rule names and bad severities fatal instead of warnings. |
-| `rules.disable` | every rule | Rule names to turn off. |
-| `rules.only` | the scanner and the statement rules at runtime | Whitelist over the rules evaluated against a statement. `disable` still applies to the ones listed, so listing and disabling the same rule disables it. It does **not** reach `slow-query`, `n-plus-one` or the plan rules — see below. |
-| `rules.severity` | every rule | `info`, `warning`, `critical`, or `off`. |
-| `rules.settings` | rules with tunables | `leading-wildcard.min-length`, `in-list-too-large.max-length`, `large-offset.threshold`, `slow-query.threshold`, `n-plus-one.threshold` / `.window`. See [Rules](rules). |
-| `redact` | all | `false` keeps raw literals in `Result.Query`. See [Redaction](redaction). |
-| `dialect` | all | `postgres` or `mysql` _0.6+_. Overrides a detected dialect; `WithDialect` in Go overrides this. See [Redaction](redaction#the-dialect-hint). |
-| `dedup.window` | middleware, integrations | Go duration or `"0"`. Equivalent to `WithFindingDedup`. |
-| `scan.exclude-paths` | scanner | Regexes matched against the scanned file path. |
+| Key                  | Applies to                                     | Notes                                                                                                                                                                                                                                   |
+| -------------------- | ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `version`            | all                                            | Reserved for forward compatibility; always `1` today.                                                                                                                                                                                   |
+| `strict`             | all                                            | Make unknown keys, unknown rule names and bad severities fatal instead of warnings.                                                                                                                                                     |
+| `rules.disable`      | every rule                                     | Rule names to turn off.                                                                                                                                                                                                                 |
+| `rules.only`         | the scanner and the statement rules at runtime | Whitelist over the rules evaluated against a statement. `disable` still applies to the ones listed, so listing and disabling the same rule disables it. It does **not** reach `slow-query`, `n-plus-one` or the plan rules — see below. |
+| `rules.severity`     | every rule                                     | `info`, `warning`, `critical`, or `off`.                                                                                                                                                                                                |
+| `rules.settings`     | rules with tunables                            | `leading-wildcard.min-length`, `in-list-too-large.max-length`, `large-offset.threshold`, `slow-query.threshold`, `n-plus-one.threshold` / `.window`. See [Rules](rules).                                                                |
+| `redact`             | all                                            | `false` keeps raw literals in `Result.Query`. See [Redaction](redaction).                                                                                                                                                               |
+| `dialect`            | all                                            | `postgres` or `mysql` _0.6+_. Overrides a detected dialect; `WithDialect` in Go overrides this. See [Redaction](redaction#the-dialect-hint).                                                                                            |
+| `dedup.window`       | middleware, integrations                       | Go duration or `"0"`. Equivalent to `WithFindingDedup`.                                                                                                                                                                                 |
+| `scan.exclude-paths` | scanner                                        | Regexes matched against the scanned file path.                                                                                                                                                                                          |
 
 Quote `"off"` — unquoted `off` is a YAML boolean.
 
@@ -134,23 +134,23 @@ YAML dependency.
 import "github.com/KARTIKrocks/sqlguard/config"
 ```
 
-| Function | Returns |
-| --- | --- |
+| Function                                                                | Returns                                                                                                                |
+| ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | `config.Middleware(path, startDir string) ([]middleware.Option, error)` | Ready-to-use options. `path == ""` discovers from `startDir`. A missing file is not an error — it yields the defaults. |
-| `config.Load(path string) (*Config, error)` | Parse one file. |
-| `config.Discover(startDir string) (*Config, string, error)` | Walk up from `startDir`; returns the config and the path it came from (`""` if none). |
-| `config.Default() *Config` | The empty config: every rule at its defaults. |
+| `config.Load(path string) (*Config, error)`                             | Parse one file.                                                                                                        |
+| `config.Discover(startDir string) (*Config, string, error)`             | Walk up from `startDir`; returns the config and the path it came from (`""` if none).                                  |
+| `config.Default() *Config`                                              | The empty config: every rule at its defaults.                                                                          |
 
 And on a `*Config`:
 
-| Method | Use |
-| --- | --- |
-| `MiddlewareOptions() ([]middleware.Option, error)` | `WithAnalyzer` from the profile — which carries the rule settings, including the slow-query and N+1 tunables — plus `WithFindingDedup` when set. Append your own options after it. |
-| `Analyzer() (*analyzer.Analyzer, error)` | `analyzer.DefaultWithProfile` built from this file. |
-| `Profile() (analyzer.Profile, error)` | The resolved, parser-independent profile. |
-| `DedupWindow()` | `(time.Duration, ok bool, error)` — `ok` is false when the key is unset. _Changed in 0.3._ `SlowQueryThreshold()` is gone; take the profile first and read the setting off it (see below). |
-| `ExcludeMatcher() (func(path string) bool, error)` | The compiled `scan.exclude-paths` predicate. |
-| `Warnings() []string` | Non-fatal problems found while loading. Surface them. |
+| Method                                             | Use                                                                                                                                                                                        |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `MiddlewareOptions() ([]middleware.Option, error)` | `WithAnalyzer` from the profile — which carries the rule settings, including the slow-query and N+1 tunables — plus `WithFindingDedup` when set. Append your own options after it.         |
+| `Analyzer() (*analyzer.Analyzer, error)`           | `analyzer.DefaultWithProfile` built from this file.                                                                                                                                        |
+| `Profile() (analyzer.Profile, error)`              | The resolved, parser-independent profile.                                                                                                                                                  |
+| `DedupWindow()`                                    | `(time.Duration, ok bool, error)` — `ok` is false when the key is unset. _Changed in 0.3._ `SlowQueryThreshold()` is gone; take the profile first and read the setting off it (see below). |
+| `ExcludeMatcher() (func(path string) bool, error)` | The compiled `scan.exclude-paths` predicate.                                                                                                                                               |
+| `Warnings() []string`                              | Non-fatal problems found while loading. Surface them.                                                                                                                                      |
 
 The slow-query threshold now lives in the profile with every other tunable:
 
@@ -216,8 +216,8 @@ every surface.
 
 ```yaml
 rules:
-  only: [select-star]        # scanner + runtime statement rules
-  disable: [slow-query]      # and this reaches the middleware too
+  only: [select-star] # scanner + runtime statement rules
+  disable: [slow-query] # and this reaches the middleware too
 ```
 
 Inline [suppressions](suppressions) win over both: they silence a finding at

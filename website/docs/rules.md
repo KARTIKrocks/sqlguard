@@ -15,29 +15,29 @@ can be overridden per project.
 
 ## At a glance
 
-| Rule | Severity | Where | Fires on |
-| --- | --- | --- | --- |
-| `select-star` | WARNING | static, runtime | `SELECT *` / `SELECT t.*` |
-| `leading-wildcard` | WARNING | static, runtime | `LIKE '%…'`, `ILIKE '%…'` |
-| `non-sargable-predicate` | WARNING | static, runtime | `WHERE LOWER(col) = …`, `WHERE col::text = …` |
-| `add-not-null-without-default` | WARNING | static, runtime | `ALTER TABLE … ADD COLUMN … NOT NULL` with no `DEFAULT` |
-| `implicit-join` | WARNING | static, runtime | `FROM a, b` |
-| `cartesian-join` | WARNING | static, runtime | Multi-table `FROM` with no join condition and no `WHERE` |
-| `in-list-too-large` | WARNING | static, runtime | `IN (…)` with more than `max-length` elements (default 100) |
-| `large-offset` | WARNING | static, runtime | Literal `OFFSET` above `threshold` (default 1000) |
-| `select-distinct` | INFO | static, runtime | `SELECT DISTINCT` |
-| `delete-without-where` | CRITICAL | static, runtime | `DELETE` with no `WHERE` |
-| `update-without-where` | CRITICAL | static, runtime | `UPDATE` with no `WHERE` |
-| `insert-without-columns` | WARNING | static, runtime | `INSERT INTO t VALUES (…)` with no column list |
-| `select-without-limit` | WARNING | static, runtime | `SELECT … FROM` with neither `LIMIT` nor `WHERE` |
-| `orderby-without-limit` | INFO | static, runtime | `ORDER BY` with no `LIMIT` |
-| `n-plus-one` | WARNING | runtime | Same fingerprint `threshold` times within `window` |
-| `slow-query` | WARNING | runtime | Latency at or above the threshold (default 200 ms) |
-| `seq-scan` | INFO / WARNING | EXPLAIN (postgres) | A `Seq Scan` node; WARNING above 1,000 estimated rows |
-| `high-cost` | WARNING | EXPLAIN (postgres) | Any plan node with total cost above 10,000 |
-| `full-table-scan` | WARNING | EXPLAIN (mysql) | Access `type = ALL` |
-| `no-index-used` | WARNING | EXPLAIN (mysql) | Empty `key` **and** empty `possible_keys` |
-| `filesort` | INFO | EXPLAIN (mysql) | `Using filesort` in `Extra` |
+| Rule                           | Severity       | Where              | Fires on                                                    |
+| ------------------------------ | -------------- | ------------------ | ----------------------------------------------------------- |
+| `select-star`                  | WARNING        | static, runtime    | `SELECT *` / `SELECT t.*`                                   |
+| `leading-wildcard`             | WARNING        | static, runtime    | `LIKE '%…'`, `ILIKE '%…'`                                   |
+| `non-sargable-predicate`       | WARNING        | static, runtime    | `WHERE LOWER(col) = …`, `WHERE col::text = …`               |
+| `add-not-null-without-default` | WARNING        | static, runtime    | `ALTER TABLE … ADD COLUMN … NOT NULL` with no `DEFAULT`     |
+| `implicit-join`                | WARNING        | static, runtime    | `FROM a, b`                                                 |
+| `cartesian-join`               | WARNING        | static, runtime    | Multi-table `FROM` with no join condition and no `WHERE`    |
+| `in-list-too-large`            | WARNING        | static, runtime    | `IN (…)` with more than `max-length` elements (default 100) |
+| `large-offset`                 | WARNING        | static, runtime    | Literal `OFFSET` above `threshold` (default 1000)           |
+| `select-distinct`              | INFO           | static, runtime    | `SELECT DISTINCT`                                           |
+| `delete-without-where`         | CRITICAL       | static, runtime    | `DELETE` with no `WHERE`                                    |
+| `update-without-where`         | CRITICAL       | static, runtime    | `UPDATE` with no `WHERE`                                    |
+| `insert-without-columns`       | WARNING        | static, runtime    | `INSERT INTO t VALUES (…)` with no column list              |
+| `select-without-limit`         | WARNING        | static, runtime    | `SELECT … FROM` with neither `LIMIT` nor `WHERE`            |
+| `orderby-without-limit`        | INFO           | static, runtime    | `ORDER BY` with no `LIMIT`                                  |
+| `n-plus-one`                   | WARNING        | runtime            | Same fingerprint `threshold` times within `window`          |
+| `slow-query`                   | WARNING        | runtime            | Latency at or above the threshold (default 200 ms)          |
+| `seq-scan`                     | INFO / WARNING | EXPLAIN (postgres) | A `Seq Scan` node; WARNING above 1,000 estimated rows       |
+| `high-cost`                    | WARNING        | EXPLAIN (postgres) | Any plan node with total cost above 10,000                  |
+| `full-table-scan`              | WARNING        | EXPLAIN (mysql)    | Access `type = ALL`                                         |
+| `no-index-used`                | WARNING        | EXPLAIN (mysql)    | Empty `key` **and** empty `possible_keys`                   |
+| `filesort`                     | INFO           | EXPLAIN (mysql)    | `Using filesort` in `Extra`                                 |
 
 _Changed in 0.3._ Every rule in this table is addressable by name in
 [`.sqlguard.yml`](configuration): `disable` and `severity` work the same for a

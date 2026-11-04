@@ -20,11 +20,11 @@ Every surface runs the same rules through the same analyzer and reporter, so
 a finding looks the same whether it came from a test run, a CI job or a
 production log.
 
-| Surface | How | When to use it |
-| --- | --- | --- |
-| [Runtime middleware](./middleware.md) | Wraps the `database/sql` **driver**, returns a real `*sql.DB` | Catch everything your ORM or query builder emits, plus latency and N+1 |
-| [Static scanner](./scan.md) | `sqlguard scan ./...` walks Go source and resolves string constants | Gate pull requests in CI without a database |
-| [EXPLAIN analyzer](./explain.md) | `sqlguard explain --db …` plans a query on a live server | Check a specific query's plan for sequential scans and missing indexes |
+| Surface                               | How                                                                 | When to use it                                                         |
+| ------------------------------------- | ------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| [Runtime middleware](./middleware.md) | Wraps the `database/sql` **driver**, returns a real `*sql.DB`       | Catch everything your ORM or query builder emits, plus latency and N+1 |
+| [Static scanner](./scan.md)           | `sqlguard scan ./...` walks Go source and resolves string constants | Gate pull requests in CI without a database                            |
+| [EXPLAIN analyzer](./explain.md)      | `sqlguard explain --db …` plans a query on a live server            | Check a specific query's plan for sequential scans and missing indexes |
 
 Six [ORM and driver integrations](./integrations.md) — GORM, sqlx, native pgx,
 bun, xorm and ent — are additional runtime surfaces. They hook each library's
@@ -54,13 +54,13 @@ every runtime behaviour without a second option surface to learn.
 sqlguard is nine Go modules released in lockstep, so a heavy dependency never
 enters your build unless you import the module that needs it:
 
-| Module | Import path | Third-party deps |
-| --- | --- | --- |
-| Core | `github.com/KARTIKrocks/sqlguard` | none in `analyzer`, `middleware`, `reporter` |
-| Config | `…/sqlguard/config` | `gopkg.in/yaml.v3` (only here) |
-| CLI | `…/sqlguard/cmd/sqlguard` | cobra, `go/packages`, database drivers |
-| Parsers | `…/sqlguard/parsers/pgparser`, `…/parsers/mysqlparser` | the respective SQL grammar |
-| Integrations | `…/sqlguard/integrations/{gormguard,sqlxguard,pgxguard,bunguard,xormguard,entguard}` | the respective ORM/driver |
+| Module       | Import path                                                                          | Third-party deps                             |
+| ------------ | ------------------------------------------------------------------------------------ | -------------------------------------------- |
+| Core         | `github.com/KARTIKrocks/sqlguard`                                                    | none in `analyzer`, `middleware`, `reporter` |
+| Config       | `…/sqlguard/config`                                                                  | `gopkg.in/yaml.v3` (only here)               |
+| CLI          | `…/sqlguard/cmd/sqlguard`                                                            | cobra, `go/packages`, database drivers       |
+| Parsers      | `…/sqlguard/parsers/pgparser`, `…/parsers/mysqlparser`                               | the respective SQL grammar                   |
+| Integrations | `…/sqlguard/integrations/{gormguard,sqlxguard,pgxguard,bunguard,xormguard,entguard}` | the respective ORM/driver                    |
 
 Importing `analyzer` or `middleware` pulls in nothing outside the standard
 library.

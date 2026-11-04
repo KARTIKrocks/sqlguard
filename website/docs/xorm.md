@@ -31,11 +31,11 @@ engine.AddHook(xormguard.New(
 
 ## API
 
-| Symbol | Use |
-| --- | --- |
-| `xormguard.New(opts ...middleware.Option) *Hook` | Build the hook. Pass to `engine.AddHook`. |
-| `(*Hook).ResetN1()` | Clear N+1 state at a request boundary. |
-| `BeforeProcess`, `AfterProcess` | The `contexts.Hook` methods; you do not call them. |
+| Symbol                                           | Use                                                |
+| ------------------------------------------------ | -------------------------------------------------- |
+| `xormguard.New(opts ...middleware.Option) *Hook` | Build the hook. Pass to `engine.AddHook`.          |
+| `(*Hook).ResetN1()`                              | Clear N+1 state at a request boundary.             |
+| `BeforeProcess`, `AfterProcess`                  | The `contexts.Hook` methods; you do not call them. |
 
 ```go
 hook := xormguard.New(middleware.WithN1Detection(10, time.Second))

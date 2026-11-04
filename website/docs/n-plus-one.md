@@ -36,7 +36,7 @@ way to enable it without a code change:
 rules:
   settings:
     n-plus-one:
-      threshold: 5      # both keys are required; one alone does nothing
+      threshold: 5 # both keys are required; one alone does nothing
       window: 2s
 ```
 

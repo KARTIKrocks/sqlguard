@@ -36,11 +36,11 @@ In 0.2 the spelling was rejected outright — `sqlguard scan ./...` failed with
 `lstat ./...: no such file or directory` — so the form used throughout these
 docs had to be written as `sqlguard scan .`, and no path was ever ambiguous.
 
-| Flag | Default | Effect |
-| --- | --- | --- |
-| `--format console\|json` | `console` | Output shape. JSON is an array of `{rule, severity, query, fingerprint, message, suggestion, file, line}`. |
-| `--config <path>` | auto-discover | Load a specific [`.sqlguard.yml`](configuration). |
-| `--no-config` | — | Ignore any config file; run every rule at its default. |
+| Flag                     | Default       | Effect                                                                                                     |
+| ------------------------ | ------------- | ---------------------------------------------------------------------------------------------------------- |
+| `--format console\|json` | `console`     | Output shape. JSON is an array of `{rule, severity, query, fingerprint, message, suggestion, file, line}`. |
+| `--config <path>`        | auto-discover | Load a specific [`.sqlguard.yml`](configuration).                                                          |
+| `--no-config`            | —             | Ignore any config file; run every rule at its default.                                                     |
 
 Exit code is **1** when any issue is found and **0** when clean.
 
@@ -90,15 +90,15 @@ skipped, plus anything matching `scan.exclude-paths` in your config.
 The scanner type-checks the target with `golang.org/x/tools/go/packages`,
 so the query does not have to be an inline literal:
 
-| Argument shape | Resolved? |
-| --- | --- |
-| `db.Query("SELECT …")` | yes |
-| `db.Query(selectUsers)` — a `const` in the same package | yes |
-| `db.Query(queries.SelectUsers)` — a `const` in another package | yes |
-| `db.Query("SELECT id " + "FROM users")` — constant concatenation | yes |
+| Argument shape                                                       | Resolved?                                                  |
+| -------------------------------------------------------------------- | ---------------------------------------------------------- |
+| `db.Query("SELECT …")`                                               | yes                                                        |
+| `db.Query(selectUsers)` — a `const` in the same package              | yes                                                        |
+| `db.Query(queries.SelectUsers)` — a `const` in another package       | yes                                                        |
+| `db.Query("SELECT id " + "FROM users")` — constant concatenation     | yes                                                        |
 | `db.Query(fmt.Sprintf("SELECT * FROM %s WHERE id = %d", table, id))` | yes — the format string is analyzed with verbs neutralized |
-| `db.Query(buildQuery(filters))` — a runtime value | no |
-| `db.Query(q)` where `q` is a `var` | no |
+| `db.Query(buildQuery(filters))` — a runtime value                    | no                                                         |
+| `db.Query(q)` where `q` is a `var`                                   | no                                                         |
 
 For `fmt.Sprintf`, numeric verbs become `0` and everything else becomes a
 placeholder identifier, so the SQL keeps enough structure for the rules:

@@ -36,12 +36,12 @@ gormguard.Register(gormDB,
 
 ## API
 
-| Symbol | Use |
-| --- | --- |
-| `gormguard.Register(db *gorm.DB, opts ...middleware.Option) error` | Build the plugin and `db.Use` it in one call. |
-| `gormguard.New(opts ...middleware.Option) *Plugin` | Build the plugin yourself, when you need to keep a handle for `ResetN1()`. |
-| `(*Plugin).ResetN1()` | Clear N+1 state at a request boundary. No-op unless `WithN1Detection` was passed. |
-| `(*Plugin).Name() string` | `"sqlguard"` — the `gorm.Plugin` name. |
+| Symbol                                                             | Use                                                                               |
+| ------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
+| `gormguard.Register(db *gorm.DB, opts ...middleware.Option) error` | Build the plugin and `db.Use` it in one call.                                     |
+| `gormguard.New(opts ...middleware.Option) *Plugin`                 | Build the plugin yourself, when you need to keep a handle for `ResetN1()`.        |
+| `(*Plugin).ResetN1()`                                              | Clear N+1 state at a request boundary. No-op unless `WithN1Detection` was passed. |
+| `(*Plugin).Name() string`                                          | `"sqlguard"` — the `gorm.Plugin` name.                                            |
 
 ```go
 plugin := gormguard.New(middleware.WithN1Detection(10, time.Second))

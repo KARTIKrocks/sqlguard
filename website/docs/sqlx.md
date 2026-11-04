@@ -49,15 +49,15 @@ err := db.Select(&users, "SELECT * FROM users") // warns: select-star
 
 ### API
 
-| Symbol | Use |
-| --- | --- |
-| `sqlxguard.WrapSqlx(db *sqlx.DB, opts ...middleware.Option) *WrappedDB` | Wrap. Panics on a nil `*sqlx.DB`. |
-| `(*WrappedDB).DB() *sqlx.DB` | The underlying connection, for methods the wrapper does not expose. |
-| `(*WrappedDB).ResetN1()` | Clear N+1 state at a request boundary. |
-| `Select`, `SelectContext`, `Get`, `GetContext`, `Queryx` | sqlx helpers, analyzed. |
-| `NamedExec`, `NamedExecContext` | Named-parameter exec, analyzed. |
-| `Query`, `QueryContext`, `Exec`, `ExecContext` | `database/sql` passthroughs, analyzed. |
-| `Ping`, `Close` | Passthroughs. |
+| Symbol                                                                  | Use                                                                 |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `sqlxguard.WrapSqlx(db *sqlx.DB, opts ...middleware.Option) *WrappedDB` | Wrap. Panics on a nil `*sqlx.DB`.                                   |
+| `(*WrappedDB).DB() *sqlx.DB`                                            | The underlying connection, for methods the wrapper does not expose. |
+| `(*WrappedDB).ResetN1()`                                                | Clear N+1 state at a request boundary.                              |
+| `Select`, `SelectContext`, `Get`, `GetContext`, `Queryx`                | sqlx helpers, analyzed.                                             |
+| `NamedExec`, `NamedExecContext`                                         | Named-parameter exec, analyzed.                                     |
+| `Query`, `QueryContext`, `Exec`, `ExecContext`                          | `database/sql` passthroughs, analyzed.                              |
+| `Ping`, `Close`                                                         | Passthroughs.                                                       |
 
 Everything you call through `db.DB()` bypasses analysis. That is the
 trade-off of a wrapper type versus the driver layer, and the reason

@@ -37,11 +37,11 @@ client := ent.NewClient(ent.Driver(guarded))
 
 ## API
 
-| Symbol | Use |
-| --- | --- |
+| Symbol                                                               | Use                                                                               |
+| -------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
 | `entguard.Wrap(d dialect.Driver, opts ...middleware.Option) *Driver` | Decorate any `dialect.Driver` — including one already wrapped by `dialect.Debug`. |
-| `(*Driver).ResetN1()` | Clear N+1 state at a request boundary. |
-| `Exec`, `Query`, `Tx`, `BeginTx` | The `dialect.Driver` methods; ent calls them. |
+| `(*Driver).ResetN1()`                                                | Clear N+1 state at a request boundary.                                            |
+| `Exec`, `Query`, `Tx`, `BeginTx`                                     | The `dialect.Driver` methods; ent calls them.                                     |
 
 ```go
 guarded := entguard.Wrap(drv, middleware.WithN1Detection(10, time.Second))

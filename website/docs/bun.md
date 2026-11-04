@@ -34,11 +34,11 @@ db = db.WithQueryHook(bunguard.New(
 
 ## API
 
-| Symbol | Use |
-| --- | --- |
-| `bunguard.New(opts ...middleware.Option) *QueryHook` | Build the hook. Pass to `db.WithQueryHook`. |
-| `(*QueryHook).ResetN1()` | Clear N+1 state at a request boundary. |
-| `BeforeQuery`, `AfterQuery` | The `bun.QueryHook` methods; you do not call them. |
+| Symbol                                               | Use                                                |
+| ---------------------------------------------------- | -------------------------------------------------- |
+| `bunguard.New(opts ...middleware.Option) *QueryHook` | Build the hook. Pass to `db.WithQueryHook`.        |
+| `(*QueryHook).ResetN1()`                             | Clear N+1 state at a request boundary.             |
+| `BeforeQuery`, `AfterQuery`                          | The `bun.QueryHook` methods; you do not call them. |
 
 ```go
 hook := bunguard.New(middleware.WithN1Detection(10, time.Second))
