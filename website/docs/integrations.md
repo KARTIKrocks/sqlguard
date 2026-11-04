@@ -25,14 +25,14 @@ learn.
 
 ## Coverage matrix
 
-| Module | Hooks | Covers | Install |
-| --- | --- | --- | --- |
-| [`gormguard`](gorm) | `gorm.Plugin` callbacks on all six chains | Create / Query / Update / Delete / Row / Raw | `go get github.com/KARTIKrocks/sqlguard/integrations/gormguard` |
-| [`sqlxguard`](sqlx) | Wrapper around `*sqlx.DB` | `Select`, `Get`, `Queryx`, `NamedExec` (+ `Context`), `Query`, `Exec` | `go get github.com/KARTIKrocks/sqlguard/integrations/sqlxguard` |
-| [`pgxguard`](pgx) | `pgx.QueryTracer` + `pgx.BatchTracer` | `Query`, `QueryRow`, `Exec`, `SendBatch` on `pgx.Conn` and `pgxpool.Pool` | `go get github.com/KARTIKrocks/sqlguard/integrations/pgxguard` |
-| [`bunguard`](bun) | `bun.QueryHook` | Every query bun renders | `go get github.com/KARTIKrocks/sqlguard/integrations/bunguard` |
-| [`xormguard`](xorm) | xorm `contexts.Hook` | Every statement xorm executes | `go get github.com/KARTIKrocks/sqlguard/integrations/xormguard` |
-| [`entguard`](ent) | Decorates ent's `dialect.Driver` | `Exec`, `Query`, and transactions it opens | `go get github.com/KARTIKrocks/sqlguard/integrations/entguard` |
+| Module              | Hooks                                     | Covers                                                                    | Install                                                         |
+| ------------------- | ----------------------------------------- | ------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| [`gormguard`](gorm) | `gorm.Plugin` callbacks on all six chains | Create / Query / Update / Delete / Row / Raw                              | `go get github.com/KARTIKrocks/sqlguard/integrations/gormguard` |
+| [`sqlxguard`](sqlx) | Wrapper around `*sqlx.DB`                 | `Select`, `Get`, `Queryx`, `NamedExec` (+ `Context`), `Query`, `Exec`     | `go get github.com/KARTIKrocks/sqlguard/integrations/sqlxguard` |
+| [`pgxguard`](pgx)   | `pgx.QueryTracer` + `pgx.BatchTracer`     | `Query`, `QueryRow`, `Exec`, `SendBatch` on `pgx.Conn` and `pgxpool.Pool` | `go get github.com/KARTIKrocks/sqlguard/integrations/pgxguard`  |
+| [`bunguard`](bun)   | `bun.QueryHook`                           | Every query bun renders                                                   | `go get github.com/KARTIKrocks/sqlguard/integrations/bunguard`  |
+| [`xormguard`](xorm) | xorm `contexts.Hook`                      | Every statement xorm executes                                             | `go get github.com/KARTIKrocks/sqlguard/integrations/xormguard` |
+| [`entguard`](ent)   | Decorates ent's `dialect.Driver`          | `Exec`, `Query`, and transactions it opens                                | `go get github.com/KARTIKrocks/sqlguard/integrations/entguard`  |
 
 Each is its own Go module, so its ORM dependency enters your build only
 when you import it. All nine modules in the repository are released in

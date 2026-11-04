@@ -44,12 +44,12 @@ conn, err := pgx.ConnectConfig(ctx, cfg)
 
 ## API
 
-| Symbol | Use |
-| --- | --- |
-| `pgxguard.ApplyPool(cfg *pgxpool.Config, opts ...middleware.Option) *pgxpool.Config` | Install on a pool config. Returns `cfg` for chaining. Panics on nil. |
-| `pgxguard.Apply(cfg *pgx.ConnConfig, opts ...middleware.Option) *pgx.ConnConfig` | Install on a connection config. Returns `cfg`. Panics on nil. |
-| `pgxguard.NewTracer(opts ...middleware.Option) *Tracer` | Build the tracer yourself, to keep a handle for `ResetN1()` or to compose manually. |
-| `(*Tracer).ResetN1()` | Clear N+1 state at a request boundary. |
+| Symbol                                                                               | Use                                                                                 |
+| ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| `pgxguard.ApplyPool(cfg *pgxpool.Config, opts ...middleware.Option) *pgxpool.Config` | Install on a pool config. Returns `cfg` for chaining. Panics on nil.                |
+| `pgxguard.Apply(cfg *pgx.ConnConfig, opts ...middleware.Option) *pgx.ConnConfig`     | Install on a connection config. Returns `cfg`. Panics on nil.                       |
+| `pgxguard.NewTracer(opts ...middleware.Option) *Tracer`                              | Build the tracer yourself, to keep a handle for `ResetN1()` or to compose manually. |
+| `(*Tracer).ResetN1()`                                                                | Clear N+1 state at a request boundary.                                              |
 
 ## Composes with existing tracers
 
@@ -85,12 +85,12 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 ## Coverage details
 
-| pgx call | Seam | Static rules | N+1 | Latency |
-| --- | --- | --- | --- | --- |
-| `Query`, `QueryRow`, `Exec` | `QueryTracer` | yes | yes | yes, on success |
-| Prepared statements executed via the above | `QueryTracer` | yes | yes | yes |
-| `SendBatch` | `BatchTracer`, per statement | yes | yes | **no** |
-| `CopyFrom` | — | no | no | no |
+| pgx call                                   | Seam                         | Static rules | N+1 | Latency         |
+| ------------------------------------------ | ---------------------------- | ------------ | --- | --------------- |
+| `Query`, `QueryRow`, `Exec`                | `QueryTracer`                | yes          | yes | yes, on success |
+| Prepared statements executed via the above | `QueryTracer`                | yes          | yes | yes             |
+| `SendBatch`                                | `BatchTracer`, per statement | yes          | yes | **no**          |
+| `CopyFrom`                                 | —                            | no           | no  | no              |
 
 - **Batches**: pgx exposes only the whole-batch round trip, not
   per-statement latency, so `slow-query` is deliberately not reported for

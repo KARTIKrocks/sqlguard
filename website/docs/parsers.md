@@ -60,16 +60,16 @@ Neither parser uses cgo.
 
 ## What a real parser changes
 
-| Fact | Fallback | Real parser |
-| --- | --- | --- |
-| `Kind` (SELECT / INSERT / UPDATE / DELETE / other) | lexical | AST |
-| `HasWhere`, `HasLimit`, `HasOrderBy`, `HasFrom` | lexical | AST — correct through CTEs, subqueries, dialect syntax |
-| `SelectStar`, `SelectDistinct` | lexical | AST — `COUNT(*)` and `COUNT(DISTINCT x)` never confuse it |
-| `InsertColumnsListed` | lexical | AST |
-| `OffsetValue` | lexical | AST limit clause |
-| `MaxInListLen` (`in-list-too-large`) | lexical | **still lexical** — the AST discards the literal list |
-| `ImplicitCommaJoin`, `CartesianJoin` | lexical | **still lexical** — deliberately text-level |
-| `LeadingWildcardLike`, `LeadingWildcardTermLen`, `NonSargablePredicate`, `AddNotNullNoDefault` | lexical | **still lexical** — they read literal values or DDL text the AST does not carry |
+| Fact                                                                                           | Fallback | Real parser                                                                     |
+| ---------------------------------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------- |
+| `Kind` (SELECT / INSERT / UPDATE / DELETE / other)                                             | lexical  | AST                                                                             |
+| `HasWhere`, `HasLimit`, `HasOrderBy`, `HasFrom`                                                | lexical  | AST — correct through CTEs, subqueries, dialect syntax                          |
+| `SelectStar`, `SelectDistinct`                                                                 | lexical  | AST — `COUNT(*)` and `COUNT(DISTINCT x)` never confuse it                       |
+| `InsertColumnsListed`                                                                          | lexical  | AST                                                                             |
+| `OffsetValue`                                                                                  | lexical  | AST limit clause                                                                |
+| `MaxInListLen` (`in-list-too-large`)                                                           | lexical  | **still lexical** — the AST discards the literal list                           |
+| `ImplicitCommaJoin`, `CartesianJoin`                                                           | lexical  | **still lexical** — deliberately text-level                                     |
+| `LeadingWildcardLike`, `LeadingWildcardTermLen`, `NonSargablePredicate`, `AddNotNullNoDefault` | lexical  | **still lexical** — they read literal values or DDL text the AST does not carry |
 
 The first group is the false-positive-prone set; those become exact
 (`Statement.Exact == true`) for the statements each parser models:

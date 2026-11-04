@@ -27,13 +27,13 @@ sqlguard explain --dialect mysql --db "app:secret@tcp(localhost:3306)/app" \
 sqlguard explain --db "…" --format json "SELECT …"
 ```
 
-| Flag | Default | Effect |
-| --- | --- | --- |
-| `--db <dsn>` | required | Connection string. Postgres DSNs use pgx's `postgres://` URL or key=value form; MySQL uses `go-sql-driver/mysql` DSN syntax. |
-| `--dialect postgres\|mysql` | `postgres` | Which planner to talk to. MariaDB works through `mysql`. |
-| `--format console\|json` | `console` | Output shape. |
-| `--allow-dml` | off | Permit `INSERT` / `UPDATE` / `DELETE` (incl. `REPLACE` / `UPSERT` _0.5+_). Still planned only, still rolled back. |
-| `--config`, `--no-config` | — | Persistent flags. `rules:` config applies — see below. |
+| Flag                        | Default    | Effect                                                                                                                       |
+| --------------------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `--db <dsn>`                | required   | Connection string. Postgres DSNs use pgx's `postgres://` URL or key=value form; MySQL uses `go-sql-driver/mysql` DSN syntax. |
+| `--dialect postgres\|mysql` | `postgres` | Which planner to talk to. MariaDB works through `mysql`.                                                                     |
+| `--format console\|json`    | `console`  | Output shape.                                                                                                                |
+| `--allow-dml`               | off        | Permit `INSERT` / `UPDATE` / `DELETE` (incl. `REPLACE` / `UPSERT` _0.5+_). Still planned only, still rolled back.            |
+| `--config`, `--no-config`   | —          | Persistent flags. `rules:` config applies — see below.                                                                       |
 
 The whole command runs under a 30-second timeout, including the initial
 connectivity check. Exit code is **1** when the plan has issues, **0**
@@ -63,13 +63,13 @@ there is no log sink to protect, and you need to recognise your own query.
 
 ## What it detects
 
-| Rule | Dialect | Fires on |
-| --- | --- | --- |
-| `seq-scan` | postgres | A `Seq Scan` node. `INFO` at ≤ 1,000 estimated rows, `WARNING` above. |
-| `high-cost` | postgres | Any node with `Total Cost` > 10,000. |
-| `full-table-scan` | mysql | A row with access `type = ALL`. |
-| `no-index-used` | mysql | A row with empty `key` **and** empty `possible_keys`. |
-| `filesort` | mysql | `Using filesort` in `Extra`. |
+| Rule              | Dialect  | Fires on                                                              |
+| ----------------- | -------- | --------------------------------------------------------------------- |
+| `seq-scan`        | postgres | A `Seq Scan` node. `INFO` at ≤ 1,000 estimated rows, `WARNING` above. |
+| `high-cost`       | postgres | Any node with `Total Cost` > 10,000.                                  |
+| `full-table-scan` | mysql    | A row with access `type = ALL`.                                       |
+| `no-index-used`   | mysql    | A row with empty `key` **and** empty `possible_keys`.                 |
+| `filesort`        | mysql    | `Using filesort` in `Extra`.                                          |
 
 _Changed in 0.3._ These five are ordinary rule names now, so
 [`.sqlguard.yml`](configuration) can turn one off or re-severity it:

@@ -26,13 +26,13 @@ npm run check    # lint + typecheck + build
 
 Individually:
 
-| Command | Does |
-| --- | --- |
-| `npm run lint` | Biome lint + format check |
-| `npm run lint:fix` | Biome autofix |
-| `npm run typecheck` | `tsc --noEmit` |
-| `npm run build` | full production build, all live versions |
-| `npm run build:fast` | narrowed build — what CI runs on PRs |
+| Command              | Does                                     |
+| -------------------- | ---------------------------------------- |
+| `npm run lint`       | Biome lint + format check                |
+| `npm run lint:fix`   | Biome autofix                            |
+| `npm run typecheck`  | `tsc --noEmit`                           |
+| `npm run build`      | full production build, all live versions |
+| `npm run build:fast` | narrowed build — what CI runs on PRs     |
 
 Markdown is linted separately, repo-wide, with `make lint-docs` from the
 repository root (Biome has no Markdown support). Config and rationale live in

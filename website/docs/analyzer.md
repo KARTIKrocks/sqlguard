@@ -32,23 +32,23 @@ through the fallback parser.
 
 ### `Result`
 
-| Field | Meaning |
-| --- | --- |
-| `RuleName string` | Stable rule identifier, e.g. `select-star`. |
+| Field                        | Meaning                                                                                                  |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `RuleName string`            | Stable rule identifier, e.g. `select-star`.                                                              |
 | `Severity analyzer.Severity` | `SeverityInfo`, `SeverityWarning`, `SeverityCritical`. `String()` gives `INFO` / `WARNING` / `CRITICAL`. |
-| `Query string` | The offending SQL, [redacted](redaction) unless the analyzer was built `WithRawQuery()`. |
-| `Fingerprint string` | Always set. PII-free, low-cardinality query identity. |
-| `Message string` | What was detected. |
-| `Suggestion string` | How to fix it. May be empty. |
-| `File string`, `Line int` | Set only by the static scanner. |
+| `Query string`               | The offending SQL, [redacted](redaction) unless the analyzer was built `WithRawQuery()`.                 |
+| `Fingerprint string`         | Always set. PII-free, low-cardinality query identity.                                                    |
+| `Message string`             | What was detected.                                                                                       |
+| `Suggestion string`          | How to fix it. May be empty.                                                                             |
+| `File string`, `Line int`    | Set only by the static scanner.                                                                          |
 
 ## Constructors
 
-| Constructor | Rules | Configurable by name? |
-| --- | --- | --- |
-| `analyzer.Default()` | every registered rule | yes |
-| `analyzer.DefaultWithProfile(p analyzer.Profile)` | registered rules filtered/tuned by the profile | yes |
-| `analyzer.New(rules ...analyzer.Rule)` | exactly the functions you pass | no — anonymous rules have no name to configure |
+| Constructor                                       | Rules                                          | Configurable by name?                          |
+| ------------------------------------------------- | ---------------------------------------------- | ---------------------------------------------- |
+| `analyzer.Default()`                              | every registered rule                          | yes                                            |
+| `analyzer.DefaultWithProfile(p analyzer.Profile)` | registered rules filtered/tuned by the profile | yes                                            |
+| `analyzer.New(rules ...analyzer.Rule)`            | exactly the functions you pass                 | no — anonymous rules have no name to configure |
 
 And two copying modifiers:
 
@@ -169,15 +169,15 @@ configurable subset.
 
 ## Helpers
 
-| Function | Use |
-| --- | --- |
-| `analyzer.Redact(sql string) string` | Literals → `?`, comments stripped, structure kept. |
-| `analyzer.Fingerprint(sql string) string` | `Redact` + whitespace collapse + list fold. |
-| `analyzer.IsMultiStatement(sql string) bool` | Comment- and string-aware `;` check. |
-| `analyzer.ParseIgnoreComment(text string) (all bool, rules map[string]bool, found bool)` | Parse a Go comment for a suppression directive. |
-| `analyzer.RuleNames() []string` | Every registered rule name, sorted. |
-| `analyzer.NewFallbackParser() *FallbackParser` | The zero-dependency parser, for delegation. |
-| `(*Analyzer).PrepareQuery(raw string) (display, fingerprint string)` | Apply this analyzer's redaction policy to a query outside the rule path. |
+| Function                                                                                 | Use                                                                      |
+| ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `analyzer.Redact(sql string) string`                                                     | Literals → `?`, comments stripped, structure kept.                       |
+| `analyzer.Fingerprint(sql string) string`                                                | `Redact` + whitespace collapse + list fold.                              |
+| `analyzer.IsMultiStatement(sql string) bool`                                             | Comment- and string-aware `;` check.                                     |
+| `analyzer.ParseIgnoreComment(text string) (all bool, rules map[string]bool, found bool)` | Parse a Go comment for a suppression directive.                          |
+| `analyzer.RuleNames() []string`                                                          | Every registered rule name, sorted.                                      |
+| `analyzer.NewFallbackParser() *FallbackParser`                                           | The zero-dependency parser, for delegation.                              |
+| `(*Analyzer).PrepareQuery(raw string) (display, fingerprint string)`                     | Apply this analyzer's redaction policy to a query outside the rule path. |
 
 ## Reporters
 
@@ -189,10 +189,10 @@ type Reporter interface {
 }
 ```
 
-| Reporter | Output |
-| --- | --- |
+| Reporter                                                    | Output                                             |
+| ----------------------------------------------------------- | -------------------------------------------------- |
 | `reporter.NewConsoleReporter()` / `NewConsoleReporterTo(w)` | Colored, human-readable blocks; stderr by default. |
-| `reporter.NewJSONReporter()` / `NewJSONReporterTo(w)` | A JSON array; stderr by default. |
+| `reporter.NewJSONReporter()` / `NewJSONReporterTo(w)`       | A JSON array; stderr by default.                   |
 
 `Report` must be safe for concurrent calls — the middleware invokes it
 from whichever goroutine ran the query. The result slice handed to you may

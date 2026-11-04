@@ -82,11 +82,11 @@ under `ANSI_QUOTES`, but MySQL's default `sql_mode` also reads it as a _string
 literal_. So what sqlguard does with one depends on the
 [dialect](#the-dialect-hint):
 
-| Dialect | `"users"` | `"alice@example.com"` |
-| --- | --- | --- |
-| PostgreSQL | kept | kept (it can only be a name) |
-| MySQL | `?` | `?` |
-| unknown | kept | `?` |
+| Dialect    | `"users"` | `"alice@example.com"`        |
+| ---------- | --------- | ---------------------------- |
+| PostgreSQL | kept      | kept (it can only be a name) |
+| MySQL      | `?`       | `?`                          |
+| unknown    | kept      | `?`                          |
 
 _Changed in 0.6._ Before, every double-quoted run was kept, so on MySQL a
 value written as `"…"` reached the log. With the dialect unknown, a run is now
