@@ -4,7 +4,7 @@ go 1.27
 
 require (
 	github.com/go-sql-driver/mysql v1.10.1
-	github.com/jackc/pgx/v5 v5.12.0
+	github.com/jackc/pgx/v5 v5.13.0
 	github.com/mattn/go-sqlite3 v1.14.53
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/tools v0.52.0
